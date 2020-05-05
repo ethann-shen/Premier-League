@@ -125,7 +125,7 @@ home_goals_plot <- cumulative_home_goals %>%
 
 ### Animation 
 
-```{r}
+```{r include=FALSE}
 home_goals_plot2 <- home_goals_plot + 
   geom_point() +
   # https://www.datanovia.com/en/blog/gganimate-how-to-create-plots-with-beautiful-animation-in-r/
@@ -289,7 +289,7 @@ points_plot2 <- points_plot +
 
 animate(points_plot2, end_pause = 50, height = 800, width = 1200)
 
-anim_save("2017-2018 All Goals.gif", animation = last_animation())
+anim_save("2017-2018 Standings.gif", animation = last_animation())
 ```
 
 
