@@ -1,0 +1,295 @@
+---
+title: "Premier League"
+author: "Ethan Shen"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+library(jsonlite)
+library(lubridate)
+library(gganimate)
+library(ggrepel)
+library(gifski)
+library(RColorBrewer)
+```
+
+```{r}
+results = read_csv("results.csv")
+stats = read_csv("stats.csv")
+json_file <- 'https://datahub.io/sports-data/english-premier-league/datapackage.json'
+json_data <- fromJSON(paste(readLines(json_file), collapse=""))
+```
+
+```{r}
+results <- results %>%
+  filter(season > 2009) 
+
+premier_league_data = data.frame()
+
+for(i in 1:length(json_data$resources$datahub$type)){
+  if(json_data$resources$datahub$type[i]=='derived/csv'){
+    
+    path_to_file = json_data$resources$path[i]
+    data <- read.csv(url(path_to_file))
+    data <- data %>%
+      select(Div,Date,HomeTeam,AwayTeam,
+             FTHG,FTAG,FTR,HTHG,HTAG,HTR,
+             Referee,HS,AS,HST,AST,HF,AF,HC,
+             AC,HY,AY,HR,AR)
+    premier_league_data = rbind(premier_league_data, data)
+  }
+}
+```
+
+```{r}
+for(i in 1:length(json_data$resources$datahub$type)){
+  if(json_data$resources$datahub$type[i]=='derived/csv'){
+    path_to_file = json_data$resources$path[i]
+    data <- read.csv(url(path_to_file))
+    print(as.character(data$Date[1]))
+  }
+}
+```
+
+```{r}
+data_1718 <- premier_league_data[1:(380*2),] %>%
+  mutate(Date = dmy(Date)) 
+
+# 2009-2010 season
+# premier_league_data %>% 
+#    slice(tail(row_number(), 380))
+```
+
+
+```{r}
+data17 <- premier_league_data[381:(380*2),]%>%
+  mutate(HomeTeam = as.character(HomeTeam),
+         AwayTeam = as.character(AwayTeam),
+         Date = dmy(Date))
+stats17 <- stats %>%
+  filter(season > 2017)
+results17 <- results %>%
+  filter(season > 2017)
+```
+
+# Colors 
+
+```{r}
+# https://stackoverflow.com/questions/15282580/how-to-generate-a-number-of-most-distinctive-colors-in-r
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+col.pal = c(col_vector[5:25])
+```
+
+# Home Goals 
+
+### Data 
+
+```{r}
+cumulative_home_goals <- data17 %>%
+  mutate(id = row_number()) %>%
+  group_by(HomeTeam) %>%
+  mutate(cumpoints = cumsum(FTHG))  
+
+top6teams_home <- cumulative_home_goals %>%
+  group_by(HomeTeam) %>%
+  filter(id == max(id)) %>%
+  arrange(desc(cumpoints)) 
+
+score_cutoff <- top6teams_home$cumpoints[6]
+```
+
+### Plot 
+
+```{r}
+home_goals_plot <- cumulative_home_goals %>%
+  # https://stackoverflow.com/questions/29357612/plot-labels-at-ends-of-lines
+  mutate(label = if_else(id == max(id) & cumpoints >= score_cutoff, paste0(as.character(HomeTeam),": ", cumpoints), "")) %>%
+  ggplot(aes(x = Date, y = cumpoints, color = HomeTeam, group = HomeTeam)) +
+  geom_line() +
+  theme_minimal() + 
+  theme(plot.title = element_text(hjust = 0.5, face = "bold")) +
+  labs(title = "Home Goals Scored from 2017-2018 Season",
+       x="Date",
+       y = "Goals Scored") + 
+  scale_color_discrete(name="Home Team") + 
+  # https://stackoverflow.com/questions/18337653/remove-a-from-legend-when-using-aesthetics-and-geom-text
+  geom_label_repel(aes(label=as.character(label)),
+                   show.legend = FALSE,
+                   size=5) +  
+  scale_x_date(date_labels = "%b '%y", 
+               date_breaks = "1 month")
+```
+
+### Animation 
+
+```{r}
+home_goals_plot2 <- home_goals_plot + 
+  geom_point() +
+  # https://www.datanovia.com/en/blog/gganimate-how-to-create-plots-with-beautiful-animation-in-r/
+  transition_reveal(Date)
+
+#https://stackoverflow.com/questions/47681853/pause-between-gganimate-loops
+animate(home_goals_plot2, end_pause = 50,  height = 800, width = 1000)
+
+anim_save("2017-2018 Home Goals.gif", animation = last_animation())
+```
+
+# All Goals 
+
+### Data 
+
+```{r}
+home <- data17 %>%
+  select(Date, HomeTeam, FTHG) %>%
+  rename(Team = HomeTeam,
+         FTG = FTHG)
+
+away <- data17 %>%
+  select(Date, AwayTeam, FTAG) %>%
+  rename(Team = AwayTeam,
+         FTG = FTAG)
+
+all_goals <- rbind(home, away) %>%
+  arrange(Date) %>%
+  group_by(Team) %>%
+  mutate(cumgoals = cumsum(FTG)) %>%
+  mutate(final_id = row_number()) %>%
+  ungroup()
+
+
+top6teams_all <- all_goals %>%
+  group_by(Team) %>%
+  filter(cumgoals == max(cumgoals) & final_id == max(final_id)) %>%
+  arrange(desc(cumgoals)) 
+
+score_cutoff_all <- top6teams_all$cumgoals[6]
+```
+
+### Plot
+
+```{r}
+all_goals_plot <- all_goals %>%
+  mutate(Team = fct_reorder(Team, desc(cumgoals))) %>%
+  group_by(Team) %>%
+  mutate(label = if_else(final_id == max(final_id) & cumgoals >= score_cutoff_all, paste0(as.character(Team),": ", cumgoals), "")) %>%
+  ggplot(aes(x = Date, y = cumgoals, color = Team, group = Team)) +
+  geom_line() +
+  theme_minimal() + 
+  theme(plot.title = element_text(size=28, hjust = 0.5, face = "bold"),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12),
+        legend.title = element_text(size = 14, hjust = 0.5),
+        legend.text = element_text(size = 11)) +
+  labs(title = "All Goals Scored from 2017-2018 Season",
+       x="Date",
+       y = "Goals Scored") + 
+  scale_color_discrete(name="Home Team") + 
+  scale_color_manual(values = col.pal) + 
+  guides(col = guide_legend(ncol=2)) + 
+  geom_label_repel(aes(label=as.character(label)),
+                   show.legend = FALSE,
+                   size=5) +  
+  scale_x_date(date_labels = "%b '%y", 
+               date_breaks = "1 month")
+```
+
+### Animation 
+
+```{r}
+all_goals_plot2 <- all_goals_plot +  
+  geom_point() +
+  transition_reveal(Date)
+
+animate(all_goals_plot2, end_pause = 50, height = 800, width = 1200)
+
+anim_save("2017-2018 All Goals.gif", animation = last_animation())
+```
+
+# Standings 
+
+### Data 
+
+```{r}
+data17_points <- data17 %>%
+  select(Date, HomeTeam, AwayTeam, FTHG, FTAG, FTR) %>%
+  mutate(FTR = as.character(FTR),
+         HT_Points = case_when(
+           FTR == "H" ~ 3,
+           FTR == "D" ~ 1,
+           FTR == "A" ~ 0
+         ),
+         AT_Points = case_when(
+           FTR == "A" ~ 3,
+           FTR == "D" ~ 1,
+           FTR == "H" ~ 0
+         )
+  )
+
+home_points <- data17_points %>%
+  select(Date, HomeTeam, HT_Points) %>%
+  rename(Team = HomeTeam,
+         FT_Points = HT_Points)
+
+away_points <- data17_points %>%
+  select(Date, AwayTeam, AT_Points) %>%
+  rename(Team = AwayTeam,
+         FT_Points = AT_Points)
+
+team_points <- rbind(home_points, away_points) %>%
+  arrange(Date) %>%
+  group_by(Team) %>%
+  mutate(cumpoints = cumsum(FT_Points)) %>%
+  mutate(final_id = row_number()) %>%
+  ungroup()
+
+top6teams_points <- team_points %>%
+  filter(cumpoints == max(cumpoints) & final_id == max(final_id)) %>%
+  arrange(desc(cumpoints))
+
+score_cutoff_points <- top6teams_points$cumpoints[6]
+```
+
+### Plot 
+
+```{r}
+points_plot <- team_points %>%
+  mutate(Team = fct_reorder(Team, desc(cumpoints))) %>%
+  group_by(Team) %>%
+  mutate(label = if_else(final_id == max(final_id) & cumpoints >= score_cutoff_all, paste0(as.character(Team),": ", cumpoints), "")) %>%
+  ggplot(aes(x = Date, y = cumpoints, color = Team, group = Team)) +
+  geom_line() +
+  theme_minimal() + 
+  theme(plot.title = element_text(size=28, hjust = 0.5, face = "bold"),
+        axis.title = element_text(size = 16),
+        axis.text = element_text(size = 12),
+        legend.title = element_text(size = 14, hjust = 0.5),
+        legend.text = element_text(size = 11)) +
+  labs(title = "Premier League Standings from 2017-2018 Season",
+       x="Date",
+       y = "Total Points") + 
+  scale_color_discrete(name="Team") + 
+  scale_color_manual(values = col.pal) + 
+  guides(col = guide_legend(ncol=2)) + 
+  geom_label_repel(aes(label=as.character(label)),
+                   show.legend = FALSE,
+                   size=5) +  
+  scale_x_date(date_labels = "%b '%y", 
+               date_breaks = "1 month")
+```
+
+### Animation
+
+```{r}
+points_plot2 <- points_plot +  
+  geom_point() +
+  transition_reveal(Date)
+
+animate(points_plot2, end_pause = 50, height = 800, width = 1200)
+
+anim_save("2017-2018 All Goals.gif", animation = last_animation())
+```
+
+
