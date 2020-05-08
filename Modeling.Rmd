@@ -160,16 +160,18 @@ testing <- PL_data_modeling %>%
 ```{r}
 set.seed(123)
 
-control <- trainControl(method="repeatedcv", number=10, repeats=3, search="random")
-mtry <- floor(sqrt(ncol(training)))
-metric <- "Accuracy"
-rf_random <- train(win_loss ~ .- date - team - win_streak - unbeaten_streak,
-                   data=training,
-                   method="rf", 
-                   metric=metric, 
-                   tuneLength=15, 
-                   trControl=control)
-print(rf_random)
+rf_control <- trainControl(method="repeatedcv", 
+                           number=10, 
+                           repeats=5,
+                           search = "grid")
+rf_grid <- expand.grid(mtry = c(1:(ncol(training) - 5)))
+rf_baseline <- train(win_loss ~ .- date - team - win_streak - unbeaten_streak,
+                   data = training,
+                   method = "rf", 
+                   metric = "Accuracy", 
+                   trControl = rf_control,
+                   tuneGrid = rf_grid)
+print((rf_random))
 confusionMatrix(rf_random)
 plot(rf_random)
 
@@ -177,6 +179,8 @@ y_pred = predict(rf_random, testing)
 cm.rf=table(y_pred,as.factor(testing$win_loss))
 cm.rf
 sum(diag(cm.rf))/sum(cm.rf)
+
+
 
 library(randomForest)
 
@@ -213,7 +217,8 @@ y <- training$win_loss
 train_control <- trainControl(
   method = "repeatedcv",
   number = 10,
-  repeats = 10)
+  repeats = 5, 
+  search = "grid")
 
 nb.m1 <- caret::train(
   x = x,
@@ -223,8 +228,27 @@ nb.m1 <- caret::train(
   na.action=na.omit
 )
 confusionMatrix(nb.m1)
- 
-NB_pred <- predict(nb.m1, testing[-1])
+plot(nb.m1)
+
+search_grid <- expand.grid(
+  usekernel = c(TRUE, FALSE),
+  fL = 0:5,
+  adjust = seq(0, 5, by = 1)
+)
+
+as.matrix(cm.nb)
+# train model
+nb.m2 <- train(
+  x = x,
+  y = y,
+  method = "nb",
+  trControl = train_control,
+  tuneGrid = search_grid
+  )
+
+print(nb.m2)
+ print(rf_baseline)
+NB_pred <- predict(nb.m1, testing)
 
 cm.nb=table(NB_pred, testing$win_loss)
 cm.nb
@@ -261,7 +285,4 @@ cm.svm
 sum(diag(cm.svm))/sum(cm.svm)
 ```
 
-```{r}
-training$win_loss
-```
 
