@@ -114,7 +114,7 @@ ui <- dashboardPage(
         sidebarMenu(
             menuItem("Introduction", tabName = "intro",  icon = icon("home")),
             menuItem("Data", tabName = "data", icon = icon("table")) ,
-            menuItem("Plots", tabName = "plots", icon = icon("chart-line"))
+            menuItem("Visualizations", tabName = "vis", icon = icon("chart-line"))
         )
     ),
     
@@ -147,17 +147,19 @@ ui <- dashboardPage(
                     )
             ),
             
-            tabItem(tabName = "plots", 
+            tabItem(tabName = "vis", 
                     fluidPage(
-                        box(title = "Plots", 
+                        box(title = "Visualizations", 
+                            status = "primary",
+                            solidHeader = TRUE,
                             width = "100%",
-                            box(title = "Goals", 
+                            box(title = "Goals Scored", 
                                 selectizeInput("goal_season",
                                                label = h4("Select Season"),
                                                choices = unique(team_points_app$Season),
                                                selected = 1
                                 ),
-                                checkboxInput("goal_change_team", "Change Team ", value = FALSE),
+                                checkboxInput("goal_change_team", "View Specific Teams", value = FALSE),
                                 conditionalPanel(
                                     "input.goal_change_team == true",
                                     htmlOutput("goals_teamSelector")
@@ -175,13 +177,13 @@ ui <- dashboardPage(
                                 )
                             ),
                             
-                            box(title = "Points",
+                            box(title = "League Standings",
                                 selectizeInput("points_season",
                                                label = h4("Select Season"),
                                                choices = unique(team_points_app$Season),
                                                selected = 1
                                 ),
-                                checkboxInput("points_change_team", "Change Team ", value = FALSE),
+                                checkboxInput("points_change_team", "View Specific Teams", value = FALSE),
                                 conditionalPanel(
                                     "input.points_change_team == true",
                                     htmlOutput("points_teamSelector")
@@ -198,8 +200,7 @@ ui <- dashboardPage(
                                            ".shiny-output-error:before { visibility: hidden; }"
                                 )
                             )
-                            
-                            
+
                         )
                     )
             )
@@ -249,6 +250,7 @@ server <- function(input, output) {
     # Plots Tab 
     
     # https://sites.temple.edu/psmgis/2017/07/26/r-shiny-task-create-an-input-select-box-that-is-dependent-on-a-previous-input-choice/
+    
     # making choice of teams dependent on chosen season 
     
     output$goals_teamSelector <- renderUI({
@@ -270,10 +272,16 @@ server <- function(input, output) {
                     multiple = TRUE)
     })
     
+    # Goals Plot 
+    
     output$goals_plot <- renderPlot({
+        
+    
         one_season <- all_goals_app %>%
             filter(Season == input$goal_season)
 
+        # Creating Cutoff 
+        
         top6teams_points <- one_season %>%
             group_by(Team) %>%
             filter(cumgoals == max(cumgoals) & final_id == max(final_id)) %>%
@@ -290,6 +298,8 @@ server <- function(input, output) {
                    label = if_else(final_id == max(final_id) & cumgoals >= goals_cutoff,
                                    paste0(as.character(Team),": ", cumgoals),
                                    ""))
+        
+        # Actual Plot 
 
         g <- one_season %>%
             ggplot(aes(x = Date, y = cumgoals, color = Team, group = Team)) +
@@ -306,6 +316,8 @@ server <- function(input, output) {
                              show.legend = FALSE) +
             scale_x_date(date_labels = "%b '%y",
                          date_breaks = "1 month")
+        
+        # Selecting Teams 
 
         if (input$goal_change_team) {
             one_team <- one_season %>%
