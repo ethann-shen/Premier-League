@@ -1,5 +1,6 @@
 library(tidyverse)
 library(lubridate)
+library(ggrepel)
 library(shiny)
 library(shinydashboard)
 library(DT)
@@ -54,13 +55,22 @@ top6teams_points_app <- team_points_app %>%
     filter(cumpoints == max(cumpoints) & final_id == max(final_id)) %>%
     arrange(desc(Season), desc(cumpoints))
 
+
+team_points_app_shiny <- team_points_app %>%
+  #  rename("Cumulative Points" = cumpoints) %>%
+    mutate(Outcome = case_when(
+        FT_Points == 3 ~ "Win", 
+        FT_Points == 1 ~ "Draw", 
+        FT_Points == 0 ~ "Loss"
+    )) 
+
 ui <- dashboardPage(
     dashboardHeader(title = "Premier League Analysis"),
     dashboardSidebar(
         sidebarMenu(
             menuItem("Introduction", tabName = "intro",  icon = icon("home")),
-            menuItem("Data", tabName = "data", icon = icon("table")) #,
-            # menuItem("Plots", tabName = "plots", icon = icon("chart-line"))
+            menuItem("Data", tabName = "data", icon = icon("table")) ,
+            menuItem("Plots", tabName = "plots", icon = icon("chart-line"))
         )
     ),
     
@@ -87,7 +97,38 @@ ui <- dashboardPage(
                                 DTOutput("team_points"))
                         )
                     )
-            )
+            ),
+            
+            tabItem(tabName = "plots", 
+                    box(title = "Plots", 
+                        width = "100%",
+                        selectizeInput("Season",
+                                       label = h4("Select Season"),
+                                       choices = unique(team_points_app$Season),
+                                       selected = 1
+                        )
+                        
+                        #textOutput("Season"),
+                        ,
+                        
+                        # checkboxInput("change_team", "Change Team ", value = FALSE),
+                        # conditionalPanel(
+                        #     "input.change_team == true",
+                        #     selectInput("Team",
+                        #                 label = h4("Select Team"),
+                        #                 choices = sort(unique(team_points_app$Team)),
+                        #                 selected = 1),
+                        #     # textOutput("team"),
+                        # ),
+                        # actionButton("go",
+                        #              label = "Retrieve Article Headlines"),
+                        br(),
+                        br(), 
+                        #textOutput("Season"),
+                        
+                        #DTOutput("plot")
+                        plotOutput("plot")
+                    ))
         )
         
         
@@ -102,7 +143,6 @@ server <- function(input, output) {
     output$introText <- renderText({
         text <- "Here is some intro text that I will "
         paste(text)
-        
     })
     
     output$raw_data <- renderDT({
@@ -110,21 +150,62 @@ server <- function(input, output) {
     },
     selection = "single",
     rownames = FALSE,
-    options = list(scrollX = TRUE))
+    options = list(scrollX = TRUE)
+    )
     
     output$team_points <- renderDT({
-        team_points_app %>%
-            rename("Cumulative Points" = cumpoints) %>%
-            mutate(Outcome = case_when(
-                FT_Points == 3 ~ "Win", 
-                FT_Points == 1 ~ "Draw", 
-                FT_Points == 0 ~ "Loss"
-            )) %>%
-            select(-FT_Points, -final_id) 
+        team_points_app_shiny
     },
     selection = "single",
     rownames = FALSE,
     options = list(scrollX = TRUE))
+    
+    # team_eventReactive <- observeEvent(input$go, {
+    #     team_points_app_shiny
+    # 
+    # })
+    
+    
+    output$plot <- renderPlot({
+        
+        team_points_app_shiny <- team_points_app_shiny %>%
+            filter(Season == input$Season) 
+        top6teams_points <- team_points_app_shiny %>%
+            group_by(Team) %>%
+            filter(cumpoints == max(cumpoints) & final_id == max(final_id)) %>%
+            arrange(desc(cumpoints))
+        
+        score_cutoff_points <- top6teams_points$cumpoints[6]
+        
+        
+       g =  team_points_app_shiny %>%
+            mutate(label = if_else(final_id == max(final_id) & cumpoints >= score_cutoff_all, paste0(as.character(Team),": ", cumpoints), "")) %>%
+            ggplot(aes(x = Date, y = cumpoints, color = Team, group = Team)) +
+            geom_line() +
+            theme_minimal() + 
+            theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                  legend.title = element_text(hjust = 0.5)) +
+            labs(title = paste("Premier League Standings from", input$Season, "Season"),
+                 x="Date",
+                 y = "Total Points") +
+            guides(col = guide_legend(ncol=2)) + 
+            geom_label_repel(aes(label=as.character(label)),
+                      show.legend = FALSE) +
+            scale_x_date(date_labels = "%b '%y", 
+                         date_breaks = "1 month")
+        
+        
+        
+        g
+        
+        
+        # %>%
+        #     filter(Season == input$season,
+        #            Team == input$team)
+        # select_season
+    })
+    
+    
 }
 
 shinyApp(ui = ui, server = server)
