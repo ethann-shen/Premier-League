@@ -1,11 +1,13 @@
 library(tidyverse)
 library(lubridate)
 library(ggrepel)
+library(RColorBrewer)
 library(shiny)
 library(shinydashboard)
 library(DT)
 
 # Data 
+
 PL_data_app = read_csv("premier_league_data.csv") 
 
 PL_data_app <- PL_data_app %>%
@@ -33,6 +35,29 @@ PL_data_app <- PL_data_app %>%
         Date >= "2010-08-01" & Date <= "2011-06-01" ~ "2010-2011"
     ))
 
+# Data for Goals Plot 
+
+home_app <- PL_data_app %>%
+    select(Date, HomeTeam, FTHG, Season) %>%
+    rename(Team = HomeTeam,
+           FTG = FTHG) %>%
+    mutate(home_away = "Home")
+
+away_app <- PL_data_app %>%
+    select(Date, AwayTeam, FTAG, Season) %>%
+    rename(Team = AwayTeam,
+           FTG = FTAG)  %>%
+    mutate(home_away = "Away")
+
+all_goals_app <- rbind(home_app, away_app) %>%
+    arrange(Date) %>%
+    group_by(Team, Season) %>%
+    mutate(cumgoals = cumsum(FTG),
+           final_id = row_number()) %>%
+    arrange(desc(Season), desc(final_id), desc(cumgoals))
+
+# Data for Standings Plot
+
 home_points_app <- PL_data_app %>%
     select(Date, HomeTeam, HT_Points, Season) %>%
     rename(Team = HomeTeam,
@@ -48,23 +73,42 @@ team_points_app <- rbind(home_points_app, away_points_app) %>%
     group_by(Team, Season) %>%
     mutate(cumpoints = cumsum(FT_Points)) %>%
     mutate(final_id = row_number()) %>%
-    arrange(desc(Season), Team, Date) 
+    arrange(desc(Season), desc(cumpoints)) 
 
-top6teams_points_app <- team_points_app %>%
-    group_by(Team, Season) %>%
-    filter(cumpoints == max(cumpoints) & final_id == max(final_id)) %>%
-    arrange(desc(Season), desc(cumpoints))
+# Data to Display 
 
+display_data <- merge(all_goals_app, team_points_app, by = c("Date", "Team", "Season", "final_id")) %>%
+    arrange(desc(Season), Date, Team) %>%
+    rename("Location" = home_away,
+           "Full Time Goals" = FTG,
+           "Cumulative Goals" = cumgoals,
+           "Cumulative Points" = cumpoints)
 
-team_points_app_shiny <- team_points_app %>%
-  #  rename("Cumulative Points" = cumpoints) %>%
+# Goals 
+all_goals_app_shiny <- display_data %>%
+    select(Date, Team, "Full Time Goals", "Cumulative Goals", "Location", Season)
+ 
+
+# Standings
+team_points_app_shiny <- display_data %>%
     mutate(Outcome = case_when(
         FT_Points == 3 ~ "Win", 
         FT_Points == 1 ~ "Draw", 
         FT_Points == 0 ~ "Loss"
-    )) 
+    ))  %>%
+    select(Date, Team, Outcome, "Cumulative Points", "Location", Season) %>%
+
+
+# Plot Colors 
+
+qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
+col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
+col.pal = c(col_vector[5:25])
+
+# App 
 
 ui <- dashboardPage(
+    
     dashboardHeader(title = "Premier League Analysis"),
     dashboardSidebar(
         sidebarMenu(
@@ -93,42 +137,72 @@ ui <- dashboardPage(
                             box(title = "Data", status = "primary", solidHeader = TRUE, width = "100%",
                                 DTOutput("raw_data")
                             ),
-                            box(title = "Goals", status = "primary", solidHeader = TRUE, width = "100%",
-                                DTOutput("team_points"))
+                            box(title = "Goals", status = "primary", solidHeader = TRUE,
+                                DTOutput("team_goals_data")
+                            ),
+                            box(title = "Points", status = "primary", solidHeader = TRUE,
+                                DTOutput("team_points_data")
+                            )
                         )
                     )
             ),
             
             tabItem(tabName = "plots", 
-                    box(title = "Plots", 
-                        width = "100%",
-                        selectizeInput("Season",
-                                       label = h4("Select Season"),
-                                       choices = unique(team_points_app$Season),
-                                       selected = 1
+                    fluidPage(
+                        box(title = "Plots", 
+                            width = "100%",
+                            box(title = "Goals", 
+                                selectizeInput("goal_season",
+                                               label = h4("Select Season"),
+                                               choices = unique(team_points_app$Season),
+                                               selected = 1
+                                ),
+                                checkboxInput("goal_change_team", "Change Team ", value = FALSE),
+                                conditionalPanel(
+                                    "input.goal_change_team == true",
+                                    htmlOutput("goals_teamSelector")
+
+                                ),
+
+                                br(),
+                                br(),
+
+                                plotOutput("goals_plot"),
+                                # https://stackoverflow.com/questions/24652658/suppress-warning-message-in-r-console-of-shiny
+                                tags$style(type="text/css",
+                                           ".shiny-output-error { visibility: hidden; }",
+                                           ".shiny-output-error:before { visibility: hidden; }"
+                                )
+                            ),
+                            
+                            box(title = "Points",
+                                selectizeInput("points_season",
+                                               label = h4("Select Season"),
+                                               choices = unique(team_points_app$Season),
+                                               selected = 1
+                                ),
+                                checkboxInput("points_change_team", "Change Team ", value = FALSE),
+                                conditionalPanel(
+                                    "input.points_change_team == true",
+                                    htmlOutput("points_teamSelector")
+                                    
+                                ),
+                                
+                                br(),
+                                br(), 
+                                
+                                plotOutput("points_plot"),
+                                # https://stackoverflow.com/questions/24652658/suppress-warning-message-in-r-console-of-shiny
+                                tags$style(type="text/css",
+                                           ".shiny-output-error { visibility: hidden; }",
+                                           ".shiny-output-error:before { visibility: hidden; }"
+                                )
+                            )
+                            
+                            
                         )
-                        
-                        #textOutput("Season"),
-                        ,
-                        
-                        # checkboxInput("change_team", "Change Team ", value = FALSE),
-                        # conditionalPanel(
-                        #     "input.change_team == true",
-                        #     selectInput("Team",
-                        #                 label = h4("Select Team"),
-                        #                 choices = sort(unique(team_points_app$Team)),
-                        #                 selected = 1),
-                        #     # textOutput("team"),
-                        # ),
-                        # actionButton("go",
-                        #              label = "Retrieve Article Headlines"),
-                        br(),
-                        br(), 
-                        #textOutput("Season"),
-                        
-                        #DTOutput("plot")
-                        plotOutput("plot")
-                    ))
+                    )
+            )
         )
         
         
@@ -140,10 +214,15 @@ ui <- dashboardPage(
 
 
 server <- function(input, output) {
+    
+    # Intro Tab 
+    
     output$introText <- renderText({
         text <- "Here is some intro text that I will "
         paste(text)
     })
+    
+    # Data Tab 
     
     output$raw_data <- renderDT({
         PL_data_app
@@ -153,60 +232,193 @@ server <- function(input, output) {
     options = list(scrollX = TRUE)
     )
     
-    output$team_points <- renderDT({
+    output$team_goals_data <- renderDT({
+        all_goals_app_shiny
+    },
+    selection = "single",
+    rownames = FALSE,
+    options = list(scrollX = TRUE))
+    
+    output$team_points_data <- renderDT({
         team_points_app_shiny
     },
     selection = "single",
     rownames = FALSE,
     options = list(scrollX = TRUE))
     
-    # team_eventReactive <- observeEvent(input$go, {
-    #     team_points_app_shiny
-    # 
-    # })
+    # Plots Tab 
     
+    # https://sites.temple.edu/psmgis/2017/07/26/r-shiny-task-create-an-input-select-box-that-is-dependent-on-a-previous-input-choice/
+    # making choice of teams dependent on chosen season 
     
-    output$plot <- renderPlot({
+    output$goals_teamSelector <- renderUI({
         
-        team_points_app_shiny <- team_points_app_shiny %>%
-            filter(Season == input$Season) 
-        top6teams_points <- team_points_app_shiny %>%
+        data_available = team_points_app[team_points_app$Season == input$goal_season, "Team"]
+        selectInput(inputId = "goals_Team", 
+                    label = h4("Select Teams"), 
+                    choices = sort(unique(data_available)$Team), 
+                    multiple = TRUE)
+    })
+    
+    
+    output$points_teamSelector <- renderUI({
+        
+        data_available = team_points_app[team_points_app$Season == input$points_season, "Team"]
+        selectInput(inputId = "points_Team", 
+                    label = h4("Select Teams"), 
+                    choices = sort(unique(data_available)$Team), 
+                    multiple = TRUE)
+    })
+    
+    output$goals_plot <- renderPlot({
+        one_season <- all_goals_app %>%
+            filter(Season == input$goal_season)
+
+        top6teams_points <- one_season %>%
+            group_by(Team) %>%
+            filter(cumgoals == max(cumgoals) & final_id == max(final_id)) %>%
+            arrange(desc(cumgoals))
+
+        goals_cutoff <- top6teams_points$cumgoals[6]
+
+        one_season$Team <- reorder(one_season$Team, -one_season$cumgoals)
+        teams = unique(as.character(one_season$Team))
+
+        one_season <- one_season %>%
+            ungroup() %>%
+            mutate(Team=fct_relevel(Team, levels = teams),
+                   label = if_else(final_id == max(final_id) & cumgoals >= goals_cutoff,
+                                   paste0(as.character(Team),": ", cumgoals),
+                                   ""))
+
+        g <- one_season %>%
+            ggplot(aes(x = Date, y = cumgoals, color = Team, group = Team)) +
+            geom_line() +
+            theme_minimal() +
+            theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                  legend.title = element_text(hjust = 0.5)) +
+            labs(title = paste("Goals Scored from", input$goal_season, "Season"),
+                 x="Date",
+                 y = "Total Points") +
+            scale_color_manual(values = col.pal) +
+            guides(col = guide_legend(ncol=2)) +
+            geom_label_repel(aes(label=as.character(label)),
+                             show.legend = FALSE) +
+            scale_x_date(date_labels = "%b '%y",
+                         date_breaks = "1 month")
+
+        if (input$goal_change_team) {
+            one_team <- one_season %>%
+                filter(Team %in% input$goals_Team) %>%
+                mutate(label = if_else(final_id == max(final_id),
+                                       paste0(as.character(Team),": ", cumgoals),
+                                       ""))
+
+            if (nrow(one_team) == 0) {
+                g <- ggplot() + theme_void()
+
+            } else {
+                vals <- paste(input$goals_Team,  collapse=", ")
+                g <- one_team %>%
+                    ggplot(aes(x = Date, y = cumgoals, color = Team, group = Team)) +
+                    geom_line() +
+                    theme_minimal() +
+                    theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                          plot.subtitle = element_text(hjust = 0.5),
+                          legend.title = element_text(hjust = 0.5)) +
+                    labs(title = paste("Goals Scored from", input$goal_season, "Season"),
+                         subtitle = paste("Teams:", vals),
+                         x="Date",
+                         y = "Total Points") +
+                    guides(col = guide_legend(ncol=2)) +
+                    scale_color_manual(values = col.pal) +
+                    geom_label_repel(aes(label=as.character(label)),
+                                     show.legend = FALSE) +
+                    scale_x_date(date_labels = "%b '%y",
+                                 date_breaks = "1 month")
+            }
+        }
+
+        g
+    })
+
+    output$points_plot <- renderPlot({
+        
+        one_season <- team_points_app %>%
+            filter(Season == input$points_season) 
+        
+        top6teams_points <- one_season %>%
             group_by(Team) %>%
             filter(cumpoints == max(cumpoints) & final_id == max(final_id)) %>%
             arrange(desc(cumpoints))
         
         score_cutoff_points <- top6teams_points$cumpoints[6]
         
+        one_season$Team <- reorder(one_season$Team, -one_season$cumpoints)
+        teams = unique(as.character(one_season$Team))
         
-       g =  team_points_app_shiny %>%
-            mutate(label = if_else(final_id == max(final_id) & cumpoints >= score_cutoff_all, paste0(as.character(Team),": ", cumpoints), "")) %>%
+        one_season <- one_season %>%
+            ungroup() %>%
+            mutate(Team=fct_relevel(Team, levels = teams),
+                   label = if_else(final_id == max(final_id) & cumpoints >= score_cutoff_all, 
+                                   paste0(as.character(Team),": ", cumpoints), 
+                                   "")) 
+        g <- one_season %>%
             ggplot(aes(x = Date, y = cumpoints, color = Team, group = Team)) +
             geom_line() +
             theme_minimal() + 
-            theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-                  legend.title = element_text(hjust = 0.5)) +
-            labs(title = paste("Premier League Standings from", input$Season, "Season"),
+            labs(title = paste("Premier League Standings from", input$points_season, "Season"),
                  x="Date",
                  y = "Total Points") +
+            theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                  plot.subtitle = element_text(hjust = 0.5),
+                  legend.title = element_text(hjust = 0.5)) +
+            scale_color_manual(values = col.pal) + 
             guides(col = guide_legend(ncol=2)) + 
             geom_label_repel(aes(label=as.character(label)),
-                      show.legend = FALSE) +
+                             show.legend = FALSE) +
             scale_x_date(date_labels = "%b '%y", 
                          date_breaks = "1 month")
         
-        
+        if (input$points_change_team) {
+            one_team <- one_season %>%
+                filter(Team %in% input$points_Team) %>%
+                mutate(label = if_else(final_id == max(final_id), 
+                                       paste0(as.character(Team),": ", cumpoints), 
+                                       "")) 
+            
+            if (nrow(one_team) == 0) {
+                g <- ggplot() + theme_void()
+                
+            } else { 
+                vals <- paste(input$points_Team,  collapse=", ")
+                g <- one_team %>% 
+                    ggplot(aes(x = Date, y = cumpoints, color = Team, group = Team)) +
+                    geom_line() +
+                    theme_minimal() + 
+                    labs(title = paste("Premier League Standings from", input$points_season, "Season"),
+                         subtitle = paste("Teams:", vals),
+                         x="Date",
+                         y = "Total Points") +
+                    theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                          plot.subtitle = element_text(hjust = 0.5),
+                          legend.title = element_text(hjust = 0.5)) +
+                    guides(col = guide_legend(ncol=2)) + 
+                    scale_color_manual(values = col.pal) +
+                    geom_label_repel(aes(label=as.character(label)),
+                                     show.legend = FALSE) +
+                    scale_x_date(date_labels = "%b '%y", 
+                                 date_breaks = "1 month")
+            }
+        }
         
         g
         
-        
-        # %>%
-        #     filter(Season == input$season,
-        #            Team == input$team)
-        # select_season
     })
     
     
 }
 
 shinyApp(ui = ui, server = server)
+
 
