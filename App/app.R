@@ -9,7 +9,7 @@ library(knitr)
 library(kableExtra)
 library(kernlab)
 
-# Data 
+#=========================================================== Raw Data ===========================================================#
 
 PL_data_app = read_csv("premier_league_data.csv") 
 
@@ -38,7 +38,7 @@ PL_data_app <- PL_data_app %>%
         Date >= "2010-08-01" & Date <= "2011-06-01" ~ "2010-2011"
     ))
 
-# Data for Goals Plot 
+#=========================================================== Data for Goals Plot ===========================================================#
 
 home_app <- PL_data_app %>%
     select(Date, HomeTeam, FTHG, Season) %>%
@@ -59,7 +59,7 @@ all_goals_app <- rbind(home_app, away_app) %>%
            final_id = row_number()) %>%
     arrange(desc(Season), desc(final_id), desc(cumgoals))
 
-# Data for Standings Plot
+#=========================================================== Data for Standings Plot ===========================================================#
 
 home_points_app <- PL_data_app %>%
     select(Date, HomeTeam, HT_Points, Season) %>%
@@ -78,7 +78,7 @@ team_points_app <- rbind(home_points_app, away_points_app) %>%
     mutate(final_id = row_number()) %>%
     arrange(desc(Season), desc(cumpoints)) 
 
-# Data to Display 
+#=========================================================== Data to Display ===========================================================#
 
 display_data <- merge(all_goals_app, team_points_app, by = c("Date", "Team", "Season", "final_id")) %>%
     arrange(desc(Season), Date, Team) %>%
@@ -108,7 +108,7 @@ qual_col_pals = brewer.pal.info[brewer.pal.info$category == 'qual',]
 col_vector = unlist(mapply(brewer.pal, qual_col_pals$maxcolors, rownames(qual_col_pals)))
 col.pal = c(col_vector[5:25])
 
-# Data for Modeling 
+#=========================================================== Data for Modeling ===========================================================#
 
 PL_modeling_app <- PL_data_app %>%
     dplyr::select(-Div, -HTR, -Referee, -FTHG, -FTAG, -HTHG, -HTAG) %>%
@@ -201,8 +201,7 @@ PL_modeling_final_app <- PL_modeling_combined_app %>%
     select(-full_time_results, -Group, -season, -points)
 
 
-#============================================ Modeling ============================================#
-
+#=========================================================== Modeling ===========================================================#
 # Train/Test
 
 training_app <- PL_modeling_final_app %>%
@@ -230,6 +229,8 @@ rf_grid_baseline <- expand.grid(mtry = c(1:(ncol(training_app) - 6)))
 rf_grid_sums <- expand.grid(mtry = c(1:(ncol(training_app) - 5)))
 
 rf_grid_win_streak <- expand.grid(mtry = c(1:(ncol(training_app) - 4)))
+
+rf_grid_win_unbeaten_streak <- expand.grid(mtry = c(1:(ncol(training_app) - 3)))
 
 svm_grid <- expand.grid(C = seq(3**-4, 3**3, by=3**(1/2)))
 
@@ -340,12 +341,45 @@ svm_win_streak <- train(
     preProcess = c("center","scale")
 )
 
-# App 
+# With Sums, Win Streak, Unbeaten Streak 
+
+# NB 
+
+x_win_unbeaten_streak <- x %>%
+    dplyr::select(-team, -date) 
+
+nb_win_unbeaten_streak <- train(
+    x = x_win_unbeaten_streak,
+    y = y,
+    method = "nb",
+    trControl = train_control,
+    tuneGrid = nb_grid
+)
+
+# RF 
+
+rf_win_unbeaten_streak <- train(win_loss ~ .- team - date,
+                                data = training_app,
+                                method = "rf", 
+                                metric = "Accuracy", 
+                                trControl = train_control,
+                                tuneGrid = rf_grid_win_unbeaten_streak)
+
+# SVM 
+
+svm_win_unbeaten_streak <- train(
+    win_loss ~ .- team - date,
+    data = training_app, 
+    method = "svmLinear",
+    trControl = train_control,
+    tuneGrid = svm_grid,
+    preProcess = c("center","scale")
+)
+
+
+#=========================================================== App ===========================================================#
 
 shinyApp(
-    
-    #============================================ UI ============================================#
-    
     ui = dashboardPage(
         dashboardHeader(title = "Premier League Analysis"),
         dashboardSidebar(
@@ -359,6 +393,8 @@ shinyApp(
         
         dashboardBody(
             tabItems(
+                
+                #=========================================================== Intro Tab ===========================================================#
                 tabItem(tabName = "intro", 
                         fluidPage(
                             box(title = "Introduction",  
@@ -366,57 +402,37 @@ shinyApp(
                                 status = "primary",
                                 width = 1000,
                                 htmlOutput(outputId = "introText")
-                            )
+                            ),
+                            
+                            HTML('<p><img src="Logo.png"/></p>')
                         )
                 ),
                 
+                #=========================================================== Data Tab ===========================================================#
                 tabItem(tabName = "data",
-                        fluidRow(
-                            box(title = "All Data", status = "primary", solidHeader = TRUE, width = "100%",
-                                box(title = "Data", status = "primary", solidHeader = TRUE, width = "100%",
+                        fluidPage(
+                            box(title = "Datasets", status = "primary", solidHeader = TRUE, width = "100%",
+                                box(title = "Raw Data", status = "primary", width = "100%",
                                     DTOutput("raw_data")
                                 ),
-                                box(title = "Goals", status = "primary", solidHeader = TRUE,
+                                box(title = "Goals", status = "primary", 
                                     DTOutput("team_goals_data")
                                 ),
-                                box(title = "Points", status = "primary", solidHeader = TRUE,
+                                box(title = "Points", status = "primary", 
                                     DTOutput("team_points_data")
                                 )
                             )
                         )
                 ),
-                
+                #=========================================================== Plots Tab ===========================================================#
                 tabItem(tabName = "vis", 
                         fluidPage(
                             box(title = "Visualizations", 
                                 status = "primary",
                                 solidHeader = TRUE,
                                 width = "100%",
-                                box(title = "Goals Scored", 
-                                    selectizeInput("goal_season",
-                                                   label = h4("Select Season"),
-                                                   choices = unique(team_points_app$Season),
-                                                   selected = 1
-                                    ),
-                                    checkboxInput("goal_change_team", "View Specific Teams", value = FALSE),
-                                    conditionalPanel(
-                                        "input.goal_change_team == true",
-                                        htmlOutput("goals_teamSelector")
-                                        
-                                    ),
-                                    
-                                    br(),
-                                    br(),
-                                    
-                                    plotOutput("goals_plot"),
-                                    # https://stackoverflow.com/questions/24652658/suppress-warning-message-in-r-console-of-shiny
-                                    tags$style(type="text/css",
-                                               ".shiny-output-error { visibility: hidden; }",
-                                               ".shiny-output-error:before { visibility: hidden; }"
-                                    )
-                                ),
-                                
                                 box(title = "League Standings",
+                                    status = "primary",
                                     selectizeInput("points_season",
                                                    label = h4("Select Season"),
                                                    choices = unique(team_points_app$Season),
@@ -438,13 +454,38 @@ shinyApp(
                                                ".shiny-output-error { visibility: hidden; }",
                                                ".shiny-output-error:before { visibility: hidden; }"
                                     )
-                                )
+                                ), 
                                 
+                                box(title = "Goals Scored", 
+                                    status = "primary",
+                                    selectizeInput("goal_season",
+                                                   label = h4("Select Season"),
+                                                   choices = unique(team_points_app$Season),
+                                                   selected = 1
+                                    ),
+                                    checkboxInput("goal_change_team", "View Specific Teams", value = FALSE),
+                                    conditionalPanel(
+                                        "input.goal_change_team == true",
+                                        htmlOutput("goals_teamSelector")
+                                        
+                                    ),
+                                    
+                                    br(),
+                                    br(),
+                                    
+                                    plotOutput("goals_plot"),
+                                    # https://stackoverflow.com/questions/24652658/suppress-warning-message-in-r-console-of-shiny
+                                    tags$style(type="text/css",
+                                               ".shiny-output-error { visibility: hidden; }",
+                                               ".shiny-output-error:before { visibility: hidden; }"
+                                    )
+                                )
                             )
                         )
                 ),
+                #=========================================================== Models Tab ===========================================================#
                 tabItem(tabName = "prediction", 
-                        fluidRow(
+                        fluidPage(
                             box(title = "Models",
                                 status = "primary",
                                 solidHeader = TRUE,
@@ -455,6 +496,7 @@ shinyApp(
                                                selected = 1), 
                                 
                                 box(title = "Baseline Models",
+                                    status = "primary",
                                     tabBox(width = "100%",
                                            id = "tabset1", 
                                            tabPanel("Model Output",
@@ -466,6 +508,7 @@ shinyApp(
                                     )
                                 ),
                                 box(title = "Models with Past Performance",
+                                    status = "primary",
                                     tabBox(width = "100%",
                                            id = "tabset2", 
                                            tabPanel("Model Output",
@@ -476,7 +519,8 @@ shinyApp(
                                                     htmlOutput("sums_cm"))
                                     )
                                 ),
-                                box(title = "Models with Past Performance & Win Streak",
+                                box(title = "Models with Past Performance and Win Streak",
+                                    status = "primary",
                                     tabBox(width = "100%",
                                            id = "tabset3", 
                                            tabPanel("Model Output",
@@ -486,26 +530,265 @@ shinyApp(
                                            tabPanel("Confusion Matrix",
                                                     htmlOutput("win_streak_cm"))
                                     )
+                                ),
+                                box(title = "Models with Past Performance, Win Streak and Unbeaten Streak",
+                                    status = "primary",
+                                    tabBox(width = "100%",
+                                           id = "tabset4", 
+                                           tabPanel("Model Output",
+                                                    verbatimTextOutput("win_unbeaten_streak_output")),
+                                           tabPanel("Diagnostic Plot - Cross Validation",
+                                                    plotOutput("diag_plot_cv_win_unbeaten_streak")),
+                                           tabPanel("Confusion Matrix",
+                                                    htmlOutput("win_unbeaten_streak_cm"))
+                                    )
                                 )
                                 
                             )
                         )
                 )
             )
-            
-            
-            # tabItem(tabName = "")
-            
-            
         )
     ), 
     
-    #============================================ Server ============================================#
+    #=========================================================== Server ===========================================================#
     
     server = server <- function(input, output) {
         
-        print_tbl_txt <- function(prediction, data) {
-            cm = table(prediction, data$win_loss)
+        #=========================================================== Intro Tab ===========================================================#
+        
+        output$introText <- renderText({
+            text <- "
+            
+            The purpose of this project is two-fold: 1. to gain more exposure to Shiny and 2. to apply machine learning models. 
+            I have always enjoyed watching soccer and am a huge Liverpool fan, so this project uses data from the English Premier League. 
+            
+            I want to highlight two tabs: Visualizations and Models. The Visualizations tab includes two dynamic plots, with the option of changing to a specific season
+            and teams the user is interested in. The Models tab includes three models (more in the future) that seek to classify match outcomes. 
+            As the game is extremely unpredictable and thus exciting, I wanted to see if matches can be classified using features relevant to  
+            current and past performance. 
+            "
+            paste(text)
+        })
+        
+        #=========================================================== Data Tab ===========================================================#
+        
+        output$raw_data <- renderDT({
+            PL_data_app
+        },
+        selection = "single",
+        rownames = FALSE,
+        options = list(scrollX = TRUE)
+        )
+        
+        output$team_goals_data <- renderDT({
+            all_goals_app_shiny
+        },
+        selection = "single",
+        rownames = FALSE,
+        options = list(scrollX = TRUE))
+        
+        output$team_points_data <- renderDT({
+            team_points_app_shiny
+        },
+        selection = "single",
+        rownames = FALSE,
+        options = list(scrollX = TRUE))
+        
+        #=========================================================== Plots Tab ===========================================================#
+        
+        # https://sites.temple.edu/psmgis/2017/07/26/r-shiny-task-create-an-input-select-box-that-is-dependent-on-a-previous-input-choice/
+        
+        # making choice of teams dependent on chosen season 
+        
+        output$goals_teamSelector <- renderUI({
+            
+            data_available = team_points_app[team_points_app$Season == input$goal_season, "Team"]
+            selectInput(inputId = "goals_Team", 
+                        label = h4("Select Teams"), 
+                        choices = sort(unique(data_available)$Team), 
+                        multiple = TRUE)
+        })
+        
+        
+        output$points_teamSelector <- renderUI({
+            
+            data_available = team_points_app[team_points_app$Season == input$points_season, "Team"]
+            selectInput(inputId = "points_Team", 
+                        label = h4("Select Teams"), 
+                        choices = sort(unique(data_available)$Team), 
+                        multiple = TRUE)
+        })
+        
+        #=========================================================== Standings Plot ===========================================================#
+        
+        output$points_plot <- renderPlot({
+            
+            one_season <- team_points_app %>%
+                filter(Season == input$points_season) 
+            
+            top6teams_points <- one_season %>%
+                group_by(Team) %>%
+                filter(cumpoints == max(cumpoints) & final_id == max(final_id)) %>%
+                arrange(desc(cumpoints))
+            
+            score_cutoff_points <- top6teams_points$cumpoints[6]
+            lower_cutoff_points <- top6teams_points$cumpoints[18]
+            
+            
+            one_season$Team <- reorder(one_season$Team, -one_season$cumpoints)
+            teams = unique(as.character(one_season$Team))
+            
+            one_season <- one_season %>%
+                ungroup() %>%
+                mutate(Team=fct_relevel(Team, levels = teams),
+                       label = if_else((final_id == max(final_id) & cumpoints >= score_cutoff_all) | 
+                                           (final_id == max(final_id) & cumpoints <= lower_cutoff_points), 
+                                       paste0(as.character(Team),": ", cumpoints), 
+                                       "")) 
+            g <- one_season %>%
+                ggplot(aes(x = Date, y = cumpoints, color = Team, group = Team)) +
+                geom_line() +
+                theme_minimal() + 
+                labs(title = paste("Premier League Standings from", input$points_season, "Season"),
+                     x="Date",
+                     y = "Cumulative Points",
+                     caption = paste("Champion:", as.character(one_season[one_season$cumpoints == max(one_season$cumpoints), ]$Team))) +
+                theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                      plot.subtitle = element_text(hjust = 0.5),
+                      plot.caption = element_text(face = "bold"),
+                      legend.title = element_text(hjust = 0.5)) +
+                scale_color_manual(values = col.pal) + 
+                guides(col = guide_legend(ncol=2)) + 
+                geom_label_repel(aes(label=as.character(label)),
+                                 show.legend = FALSE) +
+                scale_x_date(date_labels = "%b '%y", 
+                             date_breaks = "1 month")
+            
+            if (input$points_change_team) {
+                one_team <- one_season %>%
+                    filter(Team %in% input$points_Team) %>%
+                    mutate(label = if_else(final_id == max(final_id), 
+                                           paste0(as.character(Team),": ", cumpoints), 
+                                           "")) 
+                
+                if (nrow(one_team) == 0) {
+                    g <- ggplot() + theme_void()
+                    
+                } else { 
+                    vals <- paste(input$points_Team,  collapse=", ")
+                    g <- one_team %>% 
+                        ggplot(aes(x = Date, y = cumpoints, color = Team, group = Team)) +
+                        geom_line() +
+                        theme_minimal() + 
+                        labs(title = paste("Premier League Standings from", input$points_season, "Season"),
+                             subtitle = paste("Teams:", vals),
+                             x="Date",
+                             y = "Cumulative Points",
+                             caption = paste("Champion:", as.character(one_season[one_season$cumpoints == max(one_season$cumpoints), ]$Team))) +
+                        theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                              plot.subtitle = element_text(hjust = 0.5),
+                              plot.caption = element_text(face = "bold"),
+                              legend.title = element_text(hjust = 0.5)) +
+                        guides(col = guide_legend(ncol=2)) + 
+                        scale_color_manual(values = col.pal) +
+                        geom_label_repel(aes(label=as.character(label)),
+                                         show.legend = FALSE) +
+                        scale_x_date(date_labels = "%b '%y", 
+                                     date_breaks = "1 month")
+                }
+            }
+            
+            g
+            
+        })
+        
+        #=========================================================== Goals Scored Plot ===========================================================#
+        
+        output$goals_plot <- renderPlot({
+            
+            one_season <- all_goals_app %>%
+                filter(Season == input$goal_season)
+            
+            # Creating Cutoff 
+            
+            top6teams_points <- one_season %>%
+                group_by(Team) %>%
+                filter(cumgoals == max(cumgoals) & final_id == max(final_id)) %>%
+                arrange(desc(cumgoals))
+            
+            goals_cutoff <- top6teams_points$cumgoals[6]
+            
+            one_season$Team <- reorder(one_season$Team, -one_season$cumgoals)
+            teams = unique(as.character(one_season$Team))
+            
+            one_season <- one_season %>%
+                ungroup() %>%
+                mutate(Team=fct_relevel(Team, levels = teams),
+                       label = if_else(final_id == max(final_id) & cumgoals >= goals_cutoff,
+                                       paste0(as.character(Team),": ", cumgoals),
+                                       ""))
+            
+            # Actual Plot 
+            
+            g <- one_season %>%
+                ggplot(aes(x = Date, y = cumgoals, color = Team, group = Team)) +
+                geom_line() +
+                theme_minimal() +
+                theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                      legend.title = element_text(hjust = 0.5)) +
+                labs(title = paste("Goals Scored from", input$goal_season, "Season"),
+                     x="Date",
+                     y = "Cumulative Goals") +
+                scale_color_manual(values = col.pal) +
+                guides(col = guide_legend(ncol=2)) +
+                geom_label_repel(aes(label=as.character(label)),
+                                 show.legend = FALSE) +
+                scale_x_date(date_labels = "%b '%y",
+                             date_breaks = "1 month")
+            
+            # Selecting Teams 
+            
+            if (input$goal_change_team) {
+                one_team <- one_season %>%
+                    filter(Team %in% input$goals_Team) %>%
+                    mutate(label = if_else(final_id == max(final_id),
+                                           paste0(as.character(Team),": ", cumgoals),
+                                           ""))
+                
+                if (nrow(one_team) == 0) {
+                    g <- ggplot() + theme_void()
+                    
+                } else {
+                    vals <- paste(input$goals_Team,  collapse=", ")
+                    g <- one_team %>%
+                        ggplot(aes(x = Date, y = cumgoals, color = Team, group = Team)) +
+                        geom_line() +
+                        theme_minimal() +
+                        theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                              plot.subtitle = element_text(hjust = 0.5),
+                              legend.title = element_text(hjust = 0.5)) +
+                        labs(title = paste("Goals Scored from", input$goal_season, "Season"),
+                             subtitle = paste("Teams:", vals),
+                             x="Date",
+                             y = "Cumulative Goals") +
+                        guides(col = guide_legend(ncol=2)) +
+                        scale_color_manual(values = col.pal) +
+                        geom_label_repel(aes(label=as.character(label)),
+                                         show.legend = FALSE) +
+                        scale_x_date(date_labels = "%b '%y",
+                                     date_breaks = "1 month")
+                }
+            }
+            
+            g
+        })
+        
+        
+        #=========================================================== Prediction/Models Tab ===========================================================#
+        
+        print_tbl_txt <- function(prediction) {
+            cm = table(prediction, testing_app$win_loss)
             rownames(cm) <- c("Predicted Loss", "Predicted Draw", "Predicted Win")
             colnames(cm) <- c("Actual Loss", "Actual Draw", "Actual Win")
             tbl <- cm %>%
@@ -545,13 +828,13 @@ shinyApp(
                 prediction = predict(nb_baseline, testing_app)
                 
                 # function at beginning of server 
-                print_tbl_txt(prediction, testing_app)
+                print_tbl_txt(prediction)
             } else if (input$model_type == "Random Forest"){
                 prediction = predict(rf_baseline, testing_app)
-                print_tbl_txt(prediction, testing_app)
+                print_tbl_txt(prediction)
             } else {
                 prediction = predict(svm_baseline, testing_app)
-                print_tbl_txt(prediction, testing_app)
+                print_tbl_txt(prediction)
             }
         })
         
@@ -579,13 +862,13 @@ shinyApp(
         output$sums_cm <- renderPrint({
             if (input$model_type == "Naive Bayes") {
                 prediction = predict(nb_sums, testing_app)
-                print_tbl_txt(prediction, testing_app)
+                print_tbl_txt(prediction)
             } else if (input$model_type == "Random Forest"){
                 prediction = predict(rf_sums, testing_app)
-                print_tbl_txt(prediction, testing_app)
+                print_tbl_txt(prediction)
             } else {
                 prediction = predict(svm_sums, testing_app)
-                print_tbl_txt(prediction, testing_app)
+                print_tbl_txt(prediction)
             }
         })
         
@@ -613,236 +896,49 @@ shinyApp(
         output$win_streak_cm <- renderPrint({
             if (input$model_type == "Naive Bayes") {
                 prediction = predict(nb_win_streak, testing_app)
-                print_tbl_txt(prediction, testing_app)
+                print_tbl_txt(prediction)
             } else if (input$model_type == "Random Forest"){
                 prediction = predict(rf_win_streak, testing_app)
-                print_tbl_txt(prediction, testing_app)
+                print_tbl_txt(prediction)
             } else {
                 prediction = predict(svm_win_streak, testing_app)
-                print_tbl_txt(prediction, testing_app)
+                print_tbl_txt(prediction)
             }
         })
         
+        # Past Performance & Win Streak & Unbeaten Streak
         
-        
-        
-        
-        
-        
-        # Intro Tab 
-        
-        output$introText <- renderText({
-            text <- "Here is some intro text that I will "
-            paste(text)
-        })
-        
-        # Data Tab 
-        
-        output$raw_data <- renderDT({
-            PL_data_app
-        },
-        selection = "single",
-        rownames = FALSE,
-        options = list(scrollX = TRUE)
-        )
-        
-        output$team_goals_data <- renderDT({
-            all_goals_app_shiny
-        },
-        selection = "single",
-        rownames = FALSE,
-        options = list(scrollX = TRUE))
-        
-        output$team_points_data <- renderDT({
-            team_points_app_shiny
-        },
-        selection = "single",
-        rownames = FALSE,
-        options = list(scrollX = TRUE))
-        
-        # Plots Tab 
-        
-        # https://sites.temple.edu/psmgis/2017/07/26/r-shiny-task-create-an-input-select-box-that-is-dependent-on-a-previous-input-choice/
-        
-        # making choice of teams dependent on chosen season 
-        
-        output$goals_teamSelector <- renderUI({
-            
-            data_available = team_points_app[team_points_app$Season == input$goal_season, "Team"]
-            selectInput(inputId = "goals_Team", 
-                        label = h4("Select Teams"), 
-                        choices = sort(unique(data_available)$Team), 
-                        multiple = TRUE)
-        })
-        
-        
-        output$points_teamSelector <- renderUI({
-            
-            data_available = team_points_app[team_points_app$Season == input$points_season, "Team"]
-            selectInput(inputId = "points_Team", 
-                        label = h4("Select Teams"), 
-                        choices = sort(unique(data_available)$Team), 
-                        multiple = TRUE)
-        })
-        
-        # Goals Plot 
-        
-        output$goals_plot <- renderPlot({
-            
-            one_season <- all_goals_app %>%
-                filter(Season == input$goal_season)
-            
-            # Creating Cutoff 
-            
-            top6teams_points <- one_season %>%
-                group_by(Team) %>%
-                filter(cumgoals == max(cumgoals) & final_id == max(final_id)) %>%
-                arrange(desc(cumgoals))
-            
-            goals_cutoff <- top6teams_points$cumgoals[6]
-            
-            one_season$Team <- reorder(one_season$Team, -one_season$cumgoals)
-            teams = unique(as.character(one_season$Team))
-            
-            one_season <- one_season %>%
-                ungroup() %>%
-                mutate(Team=fct_relevel(Team, levels = teams),
-                       label = if_else(final_id == max(final_id) & cumgoals >= goals_cutoff,
-                                       paste0(as.character(Team),": ", cumgoals),
-                                       ""))
-            
-            # Actual Plot 
-            
-            g <- one_season %>%
-                ggplot(aes(x = Date, y = cumgoals, color = Team, group = Team)) +
-                geom_line() +
-                theme_minimal() +
-                theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-                      legend.title = element_text(hjust = 0.5)) +
-                labs(title = paste("Goals Scored from", input$goal_season, "Season"),
-                     x="Date",
-                     y = "Total Points") +
-                scale_color_manual(values = col.pal) +
-                guides(col = guide_legend(ncol=2)) +
-                geom_label_repel(aes(label=as.character(label)),
-                                 show.legend = FALSE) +
-                scale_x_date(date_labels = "%b '%y",
-                             date_breaks = "1 month")
-            
-            # Selecting Teams 
-            
-            if (input$goal_change_team) {
-                one_team <- one_season %>%
-                    filter(Team %in% input$goals_Team) %>%
-                    mutate(label = if_else(final_id == max(final_id),
-                                           paste0(as.character(Team),": ", cumgoals),
-                                           ""))
-                
-                if (nrow(one_team) == 0) {
-                    g <- ggplot() + theme_void()
-                    
-                } else {
-                    vals <- paste(input$goals_Team,  collapse=", ")
-                    g <- one_team %>%
-                        ggplot(aes(x = Date, y = cumgoals, color = Team, group = Team)) +
-                        geom_line() +
-                        theme_minimal() +
-                        theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-                              plot.subtitle = element_text(hjust = 0.5),
-                              legend.title = element_text(hjust = 0.5)) +
-                        labs(title = paste("Goals Scored from", input$goal_season, "Season"),
-                             subtitle = paste("Teams:", vals),
-                             x="Date",
-                             y = "Total Points") +
-                        guides(col = guide_legend(ncol=2)) +
-                        scale_color_manual(values = col.pal) +
-                        geom_label_repel(aes(label=as.character(label)),
-                                         show.legend = FALSE) +
-                        scale_x_date(date_labels = "%b '%y",
-                                     date_breaks = "1 month")
-                }
+        output$win_unbeaten_streak_output <- renderPrint({
+            if (input$model_type == "Naive Bayes") {
+                print(nb_win_unbeaten_streak)
+            } else if (input$model_type == "Random Forest"){
+                print(rf_win_unbeaten_streak)
+            } else {
+                print(svm_win_unbeaten_streak)
             }
-            
-            g
         })
-        
-        output$points_plot <- renderPlot({
-            
-            one_season <- team_points_app %>%
-                filter(Season == input$points_season) 
-            
-            top6teams_points <- one_season %>%
-                group_by(Team) %>%
-                filter(cumpoints == max(cumpoints) & final_id == max(final_id)) %>%
-                arrange(desc(cumpoints))
-            
-            score_cutoff_points <- top6teams_points$cumpoints[6]
-            
-            one_season$Team <- reorder(one_season$Team, -one_season$cumpoints)
-            teams = unique(as.character(one_season$Team))
-            
-            one_season <- one_season %>%
-                ungroup() %>%
-                mutate(Team=fct_relevel(Team, levels = teams),
-                       label = if_else(final_id == max(final_id) & cumpoints >= score_cutoff_all, 
-                                       paste0(as.character(Team),": ", cumpoints), 
-                                       "")) 
-            g <- one_season %>%
-                ggplot(aes(x = Date, y = cumpoints, color = Team, group = Team)) +
-                geom_line() +
-                theme_minimal() + 
-                labs(title = paste("Premier League Standings from", input$points_season, "Season"),
-                     x="Date",
-                     y = "Total Points") +
-                theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-                      plot.subtitle = element_text(hjust = 0.5),
-                      legend.title = element_text(hjust = 0.5)) +
-                scale_color_manual(values = col.pal) + 
-                guides(col = guide_legend(ncol=2)) + 
-                geom_label_repel(aes(label=as.character(label)),
-                                 show.legend = FALSE) +
-                scale_x_date(date_labels = "%b '%y", 
-                             date_breaks = "1 month")
-            
-            if (input$points_change_team) {
-                one_team <- one_season %>%
-                    filter(Team %in% input$points_Team) %>%
-                    mutate(label = if_else(final_id == max(final_id), 
-                                           paste0(as.character(Team),": ", cumpoints), 
-                                           "")) 
-                
-                if (nrow(one_team) == 0) {
-                    g <- ggplot() + theme_void()
-                    
-                } else { 
-                    vals <- paste(input$points_Team,  collapse=", ")
-                    g <- one_team %>% 
-                        ggplot(aes(x = Date, y = cumpoints, color = Team, group = Team)) +
-                        geom_line() +
-                        theme_minimal() + 
-                        labs(title = paste("Premier League Standings from", input$points_season, "Season"),
-                             subtitle = paste("Teams:", vals),
-                             x="Date",
-                             y = "Total Points") +
-                        theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-                              plot.subtitle = element_text(hjust = 0.5),
-                              legend.title = element_text(hjust = 0.5)) +
-                        guides(col = guide_legend(ncol=2)) + 
-                        scale_color_manual(values = col.pal) +
-                        geom_label_repel(aes(label=as.character(label)),
-                                         show.legend = FALSE) +
-                        scale_x_date(date_labels = "%b '%y", 
-                                     date_breaks = "1 month")
-                }
+        output$diag_plot_cv_win_unbeaten_streak <- renderPlot({
+            if (input$model_type == "Naive Bayes") {
+                plot(nb_win_unbeaten_streak)
+            } else if (input$model_type == "Random Forest"){
+                plot(rf_win_unbeaten_streak)
+            } else {
+                plot(svm_win_unbeaten_streak)
             }
-            
-            g
-            
         })
         
-        
-        
-        
+        output$win_unbeaten_streak_cm <- renderPrint({
+            if (input$model_type == "Naive Bayes") {
+                prediction = predict(nb_win_unbeaten_streak, testing_app)
+                print_tbl_txt(prediction)
+            } else if (input$model_type == "Random Forest"){
+                prediction = predict(rf_win_unbeaten_streak, testing_app)
+                print_tbl_txt(prediction)
+            } else {
+                prediction = predict(svm_win_unbeaten_streak, testing_app)
+                print_tbl_txt(prediction)
+            }
+        })
         
     }
 )
