@@ -8,6 +8,7 @@ library(DT)
 library(knitr)
 library(kableExtra)
 library(kernlab)
+library(png)
 
 #=========================================================== Raw Data ===========================================================#
 
@@ -377,7 +378,7 @@ svm_win_unbeaten_streak <- train(
 )
 
 
-#=========================================================== App ===========================================================#
+#=========================================================== Shiny Dashboard ===========================================================#
 
 shinyApp(
     ui = dashboardPage(
@@ -401,11 +402,16 @@ shinyApp(
                                 solidHeader = TRUE,
                                 status = "primary",
                                 width = 1000,
-                                htmlOutput(outputId = "introText")
-                            ),
+                                htmlOutput("introText")
+                            ), br(), br(), br(), br(), br(), br(), br(), br(),
+                            tags$img(src="PL-logo.png")
+                           # HTML('<img src="logo.png", height="400px" style="float:right"/>')
+                        
                             
-                            HTML('<p><img src="Logo.png"/></p>')
-                        )
+                           
+                        ),
+                        div(img(src="http://images.all-free-download.com/images/graphiclarge/natural_beauty_highdefinition_picture_166133.jpg", width=100), style="text-align: center;")
+                      # div(img(src = "PL-logo.png", align = "center", height = 300), style="text-align: center;")
                 ),
                 
                 #=========================================================== Data Tab ===========================================================#
