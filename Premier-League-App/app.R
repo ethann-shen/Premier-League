@@ -205,6 +205,9 @@ PL_modeling_final_app <- PL_modeling_combined_app %>%
 
 
 #=========================================================== Modeling ===========================================================#
+
+# Commented out to deploy to server. If running in local, uncomment all code in this section. 
+
 # Train/Test
 
 # training_app <- PL_modeling_final_app %>%
