@@ -408,14 +408,21 @@ ui = dashboardPage(
                             width = 1000,
                             htmlOutput("introText")
                         ), br(), 
-                        # tags$img(src="PL-logo.png")
-                        # HTML('<img src="logo.png", height="400px" style="float:right"/>')
+                        htmlOutput("picture")
                         
+                       # tags$img(src="PL-logo.pgg")
+                         #tags$img(src="PL-logo.png")
+                        #tags$img(HTML('<img src="PL-logo.png" height="400px" style="float:right"/>'))
+                       # imageOutput("image")
+                      # div(img(src = "PL-Logo.png", align = "center", height = 300), style="text-align: center;")
+                       
+                       
                         
                         
                     ),
-                    #img(src="pics/PL-logo.png", width=100, align = "center")
-                    div(img(src = "PL-logo.png", align = "center", width = "75%"), style="text-align: center;")
+                    #img(src='PL-Logo.png', align = "right")
+                    #img(src="PL-logo.png", width=100, align = "center")
+                    #HTML(div(img(src = "PL-logo.png", align = "center", width = "75%"), style="text-align: center;"))
             ),
             
             #=========================================================== Data Tab ===========================================================#
@@ -576,6 +583,15 @@ ui = dashboardPage(
 #=========================================================== Server ===========================================================#
 
 server = function(input, output) {
+    src = "PL-Logo.jpg"
+    output$picture<-renderText({c('<img src="',src,'">')})
+    output$image <- renderImage({
+        list(
+            src = "www/PL-Logo.png",
+            contentType = "image/png",
+            alt = "PL"
+        )
+    })
     
     #=========================================================== Intro Tab ===========================================================#
     
@@ -631,7 +647,7 @@ server = function(input, output) {
     
     # making choice of teams dependent on chosen season 
     
-    output$goals_teamSelector <- renderUI({
+    output$goals_teamSelector <- renderImage({
         
         data_available = team_points_app[team_points_app$Season == input$goal_season, "Team"]
         selectInput(inputId = "goals_Team", 
@@ -1008,6 +1024,7 @@ server = function(input, output) {
     })
     
 }
+
 shinyApp(ui = ui, server = server)
 
 
