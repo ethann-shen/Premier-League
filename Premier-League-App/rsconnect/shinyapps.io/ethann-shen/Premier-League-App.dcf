@@ -1,0 +1,12 @@
+name: Premier-League-App
+title: Premier-League-App
+username:
+account: ethann-shen
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 2270149
+bundleId: 3124842
+url: https://ethann-shen.shinyapps.io/premier-league-app/
+when: 1589046341.95147
+asMultiple: FALSE
+asStatic: FALSE
