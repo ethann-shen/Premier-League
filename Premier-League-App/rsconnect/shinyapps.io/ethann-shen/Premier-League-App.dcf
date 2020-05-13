@@ -5,8 +5,8 @@ account: ethann-shen
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
 appId: 2270149
-bundleId: 3124842
+bundleId: 3134220
 url: https://ethann-shen.shinyapps.io/premier-league-app/
-when: 1589046341.95147
+when: 1589241400.45332
 asMultiple: FALSE
 asStatic: FALSE

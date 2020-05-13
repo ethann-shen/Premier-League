@@ -10,7 +10,6 @@ library(ggrepel)
 library(knitr)
 library(kableExtra)
 library(klaR)
-library(dplyr)
 
 #=========================================================== Raw Data ===========================================================#
 
@@ -407,22 +406,8 @@ ui = dashboardPage(
                             status = "primary",
                             width = 1000,
                             htmlOutput("introText")
-                        ), br(), 
-                        htmlOutput("picture")
-                        
-                       # tags$img(src="PL-logo.pgg")
-                         #tags$img(src="PL-logo.png")
-                        #tags$img(HTML('<img src="PL-logo.png" height="400px" style="float:right"/>'))
-                       # imageOutput("image")
-                      # div(img(src = "PL-Logo.png", align = "center", height = 300), style="text-align: center;")
-                       
-                       
-                        
-                        
-                    ),
-                    #img(src='PL-Logo.png', align = "right")
-                    #img(src="PL-logo.png", width=100, align = "center")
-                    #HTML(div(img(src = "PL-logo.png", align = "center", width = "75%"), style="text-align: center;"))
+                        )
+                    )
             ),
             
             #=========================================================== Data Tab ===========================================================#
@@ -445,7 +430,7 @@ ui = dashboardPage(
             ),
             #=========================================================== Plots Tab ===========================================================#
             tabItem(tabName = "vis", 
-                    fluidPage(
+                    fluidRow(
                         box(title = "Visualizations", 
                             status = "primary",
                             solidHeader = TRUE,
@@ -583,15 +568,6 @@ ui = dashboardPage(
 #=========================================================== Server ===========================================================#
 
 server = function(input, output) {
-    src = "PL-Logo.jpg"
-    output$picture<-renderText({c('<img src="',src,'">')})
-    output$image <- renderImage({
-        list(
-            src = "www/PL-Logo.png",
-            contentType = "image/png",
-            alt = "PL"
-        )
-    })
     
     #=========================================================== Intro Tab ===========================================================#
     
@@ -647,7 +623,7 @@ server = function(input, output) {
     
     # making choice of teams dependent on chosen season 
     
-    output$goals_teamSelector <- renderImage({
+    output$goals_teamSelector <- renderUI({
         
         data_available = team_points_app[team_points_app$Season == input$goal_season, "Team"]
         selectInput(inputId = "goals_Team", 
@@ -709,7 +685,7 @@ server = function(input, output) {
             geom_label_repel(aes(label=as.character(label)),
                              show.legend = FALSE) +
             scale_x_date(date_labels = "%b '%y", 
-                         date_breaks = "1 month")
+                         date_breaks = "1 month") 
         
         if (input$points_change_team) {
             one_team <- one_season %>%
