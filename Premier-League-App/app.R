@@ -6,16 +6,19 @@ library(RColorBrewer)
 library(caret)
 library(kernlab)
 library(DT)
+library(gridExtra)
 library(ggrepel)
 library(knitr)
 library(kableExtra)
 library(klaR)
+library(forecast)
+ggplot2::theme_set(new = theme_bw())
 
 #=========================================================== Raw Data ===========================================================#
 
 PL_data_app = read_csv("premier_league_data.csv") 
 
-PL_data_app <- PL_data_app[1:3420,] %>%
+PL_data_app <- PL_data_app %>%
     mutate(Date = dmy(Date)) %>%
     filter(Date >= "2010-07-14") %>%
     mutate(HT_Points = case_when(
@@ -29,6 +32,7 @@ PL_data_app <- PL_data_app[1:3420,] %>%
         FTR == "H" ~ 0
     ),
     Season = case_when(
+        Date >= "2019-08-01" ~ "2019-2020",
         Date >= "2018-08-01" & Date <= "2019-06-01" ~ "2018-2019",
         Date >= "2017-08-01" & Date <= "2018-06-01" ~ "2017-2018",
         Date >= "2016-08-01" & Date <= "2017-06-01" ~ "2016-2017",
@@ -113,6 +117,7 @@ col.pal = c(col_vector[5:25])
 #=========================================================== Data for Modeling ===========================================================#
 
 PL_modeling_app <- PL_data_app %>%
+    filter(Season != "2019-2020") %>% 
     dplyr::select(-Div, -HTR, -Referee, -FTHG, -FTAG, -HTHG, -HTAG) %>%
     dplyr::select(Date, HT_Points, AT_Points, everything()) 
 
@@ -209,20 +214,20 @@ PL_modeling_final_app <- PL_modeling_combined_app %>%
 
 # Train/Test
 
-# training_app <- PL_modeling_final_app %>%
-#     filter(date < "2018-08-10") %>%
-#     na.omit()
-# 
-# testing_app <- PL_modeling_final_app %>%
-#     filter(date >= "2018-08-10") %>%
-#     na.omit()
-# 
-# # Train Control & Grids
-# set.seed(123)
-# 
-# train_control <- trainControl(method="cv",
-#                               number=10,
-#                               search = "grid")
+training_app <- PL_modeling_final_app %>%
+    filter(date < "2018-08-10") %>%
+    na.omit()
+
+testing_app <- PL_modeling_final_app %>%
+    filter(date >= "2018-08-10") %>%
+    na.omit()
+
+# Train Control & Grids
+set.seed(123)
+
+train_control <- trainControl(method="cv",
+                              number=10,
+                              search = "grid")
 # nb_grid <- expand.grid(
 #     usekernel = c(TRUE, FALSE),
 #     fL = 0:5,
@@ -381,6 +386,28 @@ PL_modeling_final_app <- PL_modeling_combined_app %>%
 #     preProcess = c("center","scale")
 # )
 
+# save(train_control, 
+#      nb_grid, 
+#      rf_grid_baseline,
+#      rf_grid_sums,
+#      rf_grid_win_streak,
+#      rf_grid_win_unbeaten_streak,
+#      svm_grid,
+#      nb_baseline,
+#      rf_baseline,
+#      svm_baseline,
+#      nb_sums,
+#      rf_sums,
+#      svm_sums,
+#      nb_win_streak,
+#      rf_win_streak,
+#      svm_win_streak,
+#      nb_win_unbeaten_streak,
+#      rf_win_unbeaten_streak,
+#      svm_win_unbeaten_streak,
+#      file="prem_league_models.Rdata")
+# 
+# load(file="prem_league_models.Rdata")
 
 #=========================================================== Shiny Dashboard ===========================================================#
 
@@ -391,7 +418,8 @@ ui = dashboardPage(
             menuItem("Introduction", tabName = "intro",  icon = icon("home")),
             menuItem("Data", tabName = "data", icon = icon("table")) ,
             menuItem("Visualizations", tabName = "vis", icon = icon("chart-line")),
-            menuItem("Models", tabName = "prediction", icon = icon("cogs"))
+            menuItem("Models", tabName = "prediction", icon = icon("cogs")),
+            menuItem("Time Series", tabName = "ts",  icon = icon("chart-line"))
         )
     ),
     
@@ -493,6 +521,10 @@ ui = dashboardPage(
                             status = "primary",
                             solidHeader = TRUE,
                             width = "100%",
+                            box(title = "Modeling Methodology", 
+                                width = "100%", status = "primary", 
+                                htmlOutput("prediction_text")
+                            ),
                             box(title = "Summary of Results", 
                                 width = "100%", status = "primary", 
                                 htmlOutput("generalize_models")
@@ -560,10 +592,30 @@ ui = dashboardPage(
                             
                         )
                     )
+            ),
+            
+            #=========================================================== Time Series Tab ===========================================================#
+
+            tabItem(tabName = "ts",
+                    fluidPage(
+                        box(title= "Time Series",
+                            selectizeInput("ts_team",
+                                           label = h4("Select Team"),
+                                           choices = c("Liverpool", "Man City", "Arsenal"),
+                                           selected=1
+                            ),
+                            box(plotOutput("time_series")),
+                            box(plotOutput("residual_plot")),
+                            status = "primary",
+                            solidHeader = TRUE,
+                            width = "100%"
+                        )
+                    )
             )
         )
     )
 )
+
 
 #=========================================================== Server ===========================================================#
 
@@ -573,7 +625,6 @@ server = function(input, output) {
     
     output$introText <- renderUI({
         HTML("<p>The purpose of this project is two-fold: 1. to gain more exposure to Shiny and 2. to apply machine learning models.
-                 The purpose of this project is two-fold: 1. to gain more exposure to Shiny and 2. to apply machine learning models. 
                 I have always enjoyed watching soccer and am a huge 
                 <a href='https://www.youtube.com/watch?v=zIlwMVkeJ5E' target = '_blank' style = 'color:#C8102E'> Liverpool </a>
                 fan, so this project uses data from the 
@@ -592,11 +643,11 @@ server = function(input, output) {
     output$raw_data_text <- renderUI({
         HTML("<p>The source of the original data is from
                 <a href='https://datahub.io/sports-data/english-premier-league' target = '_blank'> Datahub.io</a>, which includes data from the
-                 2010-2011 to the 2018-2019 seasons. I scraped each season's data using <i>jsonlite</i> and then combined them into one data frame.<p/>")
+                 2010-2011 to the 2019-2020 seasons. Except for the most recent season, I scraped each season's data using <i>jsonlite</i> and then combined them into one data frame.<p/>")
     })
     
     output$raw_data <- renderDT({
-        PL_data_app
+        display_data
     },
     selection = "single",
     rownames = FALSE,
@@ -645,33 +696,56 @@ server = function(input, output) {
     #=========================================================== Standings Plot ===========================================================#
     
     output$points_plot <- renderPlot({
-        
+
         one_season <- team_points_app %>%
-            filter(Season == input$points_season) 
-        
+            filter(Season == input$points_season)
+
         top6teams_points <- one_season %>%
             group_by(Team) %>%
             filter(cumpoints == max(cumpoints) & final_id == max(final_id)) %>%
             arrange(desc(cumpoints))
-        
-        score_cutoff_points <- top6teams_points$cumpoints[6]
+
+        score_cutoff_points <- top6teams_points$cumpoints[4]
         lower_cutoff_points <- top6teams_points$cumpoints[18]
-        
-        
+
+
         one_season$Team <- reorder(one_season$Team, -one_season$cumpoints)
         teams = unique(as.character(one_season$Team))
-        
+
         one_season <- one_season %>%
             ungroup() %>%
             mutate(Team=fct_relevel(Team, levels = teams),
-                   label = if_else((final_id == max(final_id) & cumpoints >= score_cutoff_points) | 
-                                       (final_id == max(final_id) & cumpoints <= lower_cutoff_points), 
-                                   paste0(as.character(Team),": ", cumpoints), 
-                                   "")) 
-        g <- one_season %>%
-            ggplot(aes(x = Date, y = cumpoints, color = Team, group = Team)) +
-            geom_line() +
-            theme_minimal() + 
+                   label = if_else((final_id == max(final_id) & cumpoints >= score_cutoff_points) |
+                                       (final_id == max(final_id) & cumpoints <= lower_cutoff_points),
+                                   paste0(as.character(Team),": ", cumpoints),
+                                   ""))
+        # accounting for coronavirus break in schedule
+        pre_covid_break = one_season %>% filter(Date <= "2020-04-01" & Date >= "2019-06-01")
+        post_covid_break = one_season %>% filter(Date >= "2020-04-01")
+
+        # dotted line indicating coronavirus break
+        beginning = pre_covid_break %>%
+            group_by(Team) %>%
+            arrange(desc(final_id)) %>%
+            summarise(max_date = max(Date),
+                      max_points = max(cumpoints))
+
+        ending = post_covid_break %>%
+            group_by(Team) %>%
+            arrange((final_id)) %>%
+            summarise(min_date = min(Date),
+                      min_points = min(cumpoints))
+
+        x = beginning %>% pull(max_date)
+        y = beginning %>% pull(max_points)
+        xend = ending %>% pull(min_date)
+        yend = ending %>% pull(min_points)
+
+        g <- ggplot() +
+            geom_line(data = one_season %>% filter(Date <= "2020-04-01"),
+                      aes(x = Date, y = cumpoints, color = Team, group = Team)) +
+            geom_line(data = post_covid_break,
+                      aes(x = Date, y = cumpoints, color = Team, group = Team)) +
             labs(title = paste("Premier League Standings from", input$points_season, "Season"),
                  x="Date",
                  y = "Cumulative Points",
@@ -680,136 +754,342 @@ server = function(input, output) {
                   plot.subtitle = element_text(hjust = 0.5),
                   plot.caption = element_text(face = "bold"),
                   legend.title = element_text(hjust = 0.5)) +
-            scale_color_manual(values = col.pal) + 
-            guides(col = guide_legend(ncol=2)) + 
-            geom_label_repel(aes(label=as.character(label)),
+            scale_color_manual(values = col.pal) +
+            guides(col = guide_legend(ncol=2)) +
+            geom_label_repel(data = one_season,
+                             aes(x = Date, y = cumpoints, color = Team, group = Team, label=as.character(label)),
                              show.legend = FALSE) +
-            scale_x_date(date_labels = "%b '%y", 
-                         date_breaks = "1 month") 
-        
+            scale_x_date(date_labels = "%b '%y",
+                         date_breaks = "1 month")
+
+        # adding dotted-line for coronavirus break
+        if (nrow(pre_covid_break) == 0) {
+            g <- ggplot() +
+                geom_line(data = one_season,
+                          aes(x = Date, y = cumpoints, color = Team, group = Team)) +
+                labs(title = paste("Premier League Standings from", input$points_season, "Season"),
+                     x="Date",
+                     y = "Cumulative Points",
+                     caption = paste("Champion:", as.character(one_season[one_season$cumpoints == max(one_season$cumpoints), ]$Team))) +
+                theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                      plot.subtitle = element_text(hjust = 0.5),
+                      plot.caption = element_text(face = "bold"),
+                      legend.title = element_text(hjust = 0.5)) +
+                scale_color_manual(values = col.pal) +
+                guides(col = guide_legend(ncol=2)) +
+                geom_label_repel(data = one_season,
+                                 aes(x = Date, y = cumpoints, color = Team, group = Team, label=as.character(label)),
+                                 show.legend = FALSE) +
+                scale_x_date(date_labels = "%b '%y",
+                             date_breaks = "1 month")
+
+
+        } else {
+            g <- ggplot() +
+                geom_line(data = one_season %>% filter(Date <= "2020-04-01"),
+                          aes(x = Date, y = cumpoints, color = Team, group = Team)) +
+                geom_line(data = post_covid_break,
+                          aes(x = Date, y = cumpoints, color = Team, group = Team)) +
+                labs(title = paste("Premier League Standings from", input$points_season, "Season"),
+                     x="Date",
+                     y = "Cumulative Points",
+                     caption = paste("Champion:", as.character(one_season[one_season$cumpoints == max(one_season$cumpoints), ]$Team))) +
+                theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                      plot.subtitle = element_text(hjust = 0.5),
+                      plot.caption = element_text(face = "bold"),
+                      legend.title = element_text(hjust = 0.5)) +
+                scale_color_manual(values = col.pal) +
+                guides(col = guide_legend(ncol=2)) +
+                geom_label_repel(data = one_season,
+                                 aes(x = Date, y = cumpoints, color = Team, group = Team, label=as.character(label)),
+                                 show.legend = FALSE) +
+                scale_x_date(date_labels = "%b '%y",
+                             date_breaks = "1 month")  +
+                geom_segment(data = rbind(pre_covid_break, post_covid_break) %>% group_by(Team) %>% top_n(1, wt = final_id),
+                             aes(x = x, xend = xend, y = y, yend = yend,
+                                 color = Team, group = Team),
+                             linetype = 2, alpha = 0.8
+                )
+        }
+
+        #==================================================== Standings Plot (for specific teams) ================================================#
+
         if (input$points_change_team) {
             one_team <- one_season %>%
                 filter(Team %in% input$points_Team) %>%
-                mutate(label = if_else(final_id == max(final_id), 
-                                       paste0(as.character(Team),": ", cumpoints), 
-                                       "")) 
-            
+                mutate(label = if_else(final_id == max(final_id),
+                                       paste0(as.character(Team),": ", cumpoints),
+                                       ""))
+            # accounting for coronavirus break in schedule
+            pre_covid_break = one_team %>% filter(Date <= "2020-04-01" & Date >= "2019-06-01")
+            post_covid_break = one_team %>% filter(Date >= "2020-04-01")
+
+            # dotted line indicating coronavirus break
+            beginning = pre_covid_break %>%
+                group_by(Team) %>%
+                arrange(desc(final_id)) %>%
+                summarise(max_date = max(Date),
+                          max_points = max(cumpoints))
+
+            ending = post_covid_break %>%
+                group_by(Team) %>%
+                arrange((final_id)) %>%
+                summarise(min_date = min(Date),
+                          min_points = min(cumpoints))
+
+            x = beginning %>% pull(max_date)
+            y = beginning %>% pull(max_points)
+            xend = ending %>% pull(min_date)
+            yend = ending %>% pull(min_points)
+
             if (nrow(one_team) == 0) {
                 g <- ggplot() + theme_void()
-                
-            } else { 
+
+            } else {
                 vals <- paste(input$points_Team,  collapse=", ")
-                g <- one_team %>% 
-                    ggplot(aes(x = Date, y = cumpoints, color = Team, group = Team)) +
-                    geom_line() +
-                    theme_minimal() + 
-                    labs(title = paste("Premier League Standings from", input$points_season, "Season"),
-                         subtitle = paste("Teams:", vals),
-                         x="Date",
-                         y = "Cumulative Points",
-                         caption = paste("Champion:", as.character(one_season[one_season$cumpoints == max(one_season$cumpoints), ]$Team))) +
-                    theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-                          plot.subtitle = element_text(hjust = 0.5),
-                          plot.caption = element_text(face = "bold"),
-                          legend.title = element_text(hjust = 0.5)) +
-                    guides(col = guide_legend(ncol=2)) + 
-                    scale_color_manual(values = col.pal) +
-                    geom_label_repel(aes(label=as.character(label)),
-                                     show.legend = FALSE) +
-                    scale_x_date(date_labels = "%b '%y", 
-                                 date_breaks = "1 month")
+
+                if (nrow(pre_covid_break) == 0) {
+                    g <- ggplot() +
+                        geom_line(data = one_team,
+                                  aes(x = Date, y = cumpoints, color = Team, group = Team)) +
+                        labs(title = paste("Premier League Standings from", input$points_season, "Season"),
+                             x="Date",
+                             y = "Cumulative Points",
+                             caption = paste("Champion:", as.character(one_season[one_season$cumpoints == max(one_season$cumpoints), ]$Team))) +
+                        theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                              plot.subtitle = element_text(hjust = 0.5),
+                              plot.caption = element_text(face = "bold"),
+                              legend.title = element_text(hjust = 0.5)) +
+                        scale_color_manual(values = col.pal) +
+                        guides(col = guide_legend(ncol=2)) +
+                        geom_label_repel(data = one_team,
+                                         aes(x = Date, y = cumpoints, color = Team, group = Team, label=as.character(label)),
+                                         show.legend = FALSE) +
+                        scale_x_date(date_labels = "%b '%y",
+                                     date_breaks = "1 month")
+                } else {
+                    g <- ggplot() +
+                        geom_line(data = one_team %>% filter(Date <= "2020-04-01"),
+                                  aes(x = Date, y = cumpoints, color = Team, group = Team)) +
+                        geom_line(data = post_covid_break,
+                                  aes(x = Date, y = cumpoints, color = Team, group = Team)) +
+                        labs(title = paste("Premier League Standings from", input$points_season, "Season"),
+                             x="Date",
+                             y = "Cumulative Points",
+                             caption = paste("Champion:", as.character(one_season[one_season$cumpoints == max(one_season$cumpoints), ]$Team))) +
+                        theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                              plot.subtitle = element_text(hjust = 0.5),
+                              plot.caption = element_text(face = "bold"),
+                              legend.title = element_text(hjust = 0.5)) +
+                        scale_color_manual(values = col.pal) +
+                        guides(col = guide_legend(ncol=2)) +
+                        geom_label_repel(data = one_team,
+                                         aes(x = Date, y = cumpoints, color = Team, group = Team, label=as.character(label)),
+                                         show.legend = FALSE) +
+                        scale_x_date(date_labels = "%b '%y",
+                                     date_breaks = "1 month")  +
+                        geom_segment(data = rbind(pre_covid_break, post_covid_break) %>% group_by(Team) %>% top_n(1, wt = final_id),
+                                     aes(x = x, xend = xend, y = y, yend = yend,
+                                         color = Team, group = Team),
+                                     linetype = 2, alpha = 0.8
+                        )
+                }
             }
         }
-        
+
         g
-        
+
     })
     
     #=========================================================== Goals Scored Plot ===========================================================#
     
     output$goals_plot <- renderPlot({
-        
+
         one_season <- all_goals_app %>%
             filter(Season == input$goal_season)
-        
-        # Creating Cutoff 
-        
+
+        # Creating Cutoff
+
         top6teams_points <- one_season %>%
             group_by(Team) %>%
             filter(cumgoals == max(cumgoals) & final_id == max(final_id)) %>%
             arrange(desc(cumgoals))
-        
-        goals_cutoff <- top6teams_points$cumgoals[6]
-        
+
+        goals_cutoff <- top6teams_points$cumgoals[4]
+
         one_season$Team <- reorder(one_season$Team, -one_season$cumgoals)
         teams = unique(as.character(one_season$Team))
-        
+
         one_season <- one_season %>%
             ungroup() %>%
             mutate(Team=fct_relevel(Team, levels = teams),
                    label = if_else(final_id == max(final_id) & cumgoals >= goals_cutoff,
                                    paste0(as.character(Team),": ", cumgoals),
                                    ""))
-        
-        # Actual Plot 
-        
-        g <- one_season %>%
-            ggplot(aes(x = Date, y = cumgoals, color = Team, group = Team)) +
-            geom_line() +
-            theme_minimal() +
-            theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-                  legend.title = element_text(hjust = 0.5)) +
-            labs(title = paste("Goals Scored from", input$goal_season, "Season"),
-                 x="Date",
-                 y = "Cumulative Goals") +
-            scale_color_manual(values = col.pal) +
-            guides(col = guide_legend(ncol=2)) +
-            geom_label_repel(aes(label=as.character(label)),
-                             show.legend = FALSE) +
-            scale_x_date(date_labels = "%b '%y",
-                         date_breaks = "1 month")
-        
-        # Selecting Teams 
-        
+
+        # accounting for coronavirus break in schedule
+        pre_covid_break = one_season %>% filter(Date <= "2020-04-01" & Date >= "2019-06-01")
+        post_covid_break = one_season %>% filter(Date >= "2020-04-01")
+
+        # dotted line indicating coronavirus break
+        beginning = pre_covid_break %>%
+            group_by(Team) %>%
+            arrange(desc(final_id)) %>%
+            summarise(max_date = max(Date),
+                      max_goals = max(cumgoals))
+
+        ending = post_covid_break %>%
+            group_by(Team) %>%
+            arrange((final_id)) %>%
+            summarise(min_date = min(Date),
+                      min_goals = min(cumgoals))
+
+        x = beginning %>% pull(max_date)
+        y = beginning %>% pull(max_goals)
+        xend = ending %>% pull(min_date)
+        yend = ending %>% pull(min_goals)
+
+        # Actual Plot
+
+        # adding dotted-line for coronavirus break
+        if (nrow(pre_covid_break) == 0) {
+            g <- ggplot() +
+                geom_line(data = one_season,
+                          aes(x = Date, y = cumgoals, color = Team, group = Team)) +
+
+                theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                      legend.title = element_text(hjust = 0.5)) +
+                labs(title = paste("Goals Scored from", input$goal_season, "Season"),
+                     x="Date",
+                     y = "Cumulative Goals") +
+                scale_color_manual(values = col.pal) +
+                guides(col = guide_legend(ncol=2)) +
+                geom_label_repel(data = one_season,
+                                 aes(x = Date, y = cumgoals, color = Team, group = Team, label=as.character(label)),
+                                 show.legend = FALSE) +
+                scale_x_date(date_labels = "%b '%y",
+                             date_breaks = "1 month")
+        } else {
+            g <- ggplot() +
+                geom_line(data = one_season %>% filter(Date <= "2020-04-01"),
+                          aes(x = Date, y = cumgoals, color = Team, group = Team)) +
+                geom_line(data = post_covid_break,
+                          aes(x = Date, y = cumgoals, color = Team, group = Team)) +
+                theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                      legend.title = element_text(hjust = 0.5)) +
+                labs(title = paste("Goals Scored from", input$goal_season, "Season"),
+                     x="Date",
+                     y = "Cumulative Goals") +
+                scale_color_manual(values = col.pal) +
+                guides(col = guide_legend(ncol=2)) +
+                geom_label_repel(data = one_season,
+                                 aes(x = Date, y = cumgoals, color = Team, group = Team, label=as.character(label)),
+                                 show.legend = FALSE) +
+                scale_x_date(date_labels = "%b '%y",
+                             date_breaks = "1 month") +
+                geom_segment(data = rbind(pre_covid_break, post_covid_break) %>% group_by(Team) %>% top_n(1, wt = final_id),
+                             aes(x = x, xend = xend, y = y, yend = yend,
+                                 color = Team, group = Team),
+                             linetype = 2, alpha = 0.8
+                )
+        }
+
+        #==================================================== Goals Plot (for specific teams) ================================================#
+
         if (input$goal_change_team) {
             one_team <- one_season %>%
                 filter(Team %in% input$goals_Team) %>%
                 mutate(label = if_else(final_id == max(final_id),
                                        paste0(as.character(Team),": ", cumgoals),
                                        ""))
-            
+
+            # accounting for coronavirus break in schedule
+            pre_covid_break = one_team %>% filter(Date <= "2020-04-01" & Date >= "2019-06-01")
+            post_covid_break = one_team %>% filter(Date >= "2020-04-01")
+
+            # dotted line indicating coronavirus break
+            beginning = pre_covid_break %>%
+                group_by(Team) %>%
+                arrange(desc(final_id)) %>%
+                summarise(max_date = max(Date),
+                          max_goals = max(cumgoals))
+
+            ending = post_covid_break %>%
+                group_by(Team) %>%
+                arrange((final_id)) %>%
+                summarise(min_date = min(Date),
+                          min_goals = min(cumgoals))
+
+            x = beginning %>% pull(max_date)
+            y = beginning %>% pull(max_goals)
+            xend = ending %>% pull(min_date)
+            yend = ending %>% pull(min_goals)
+
             if (nrow(one_team) == 0) {
                 g <- ggplot() + theme_void()
-                
+
             } else {
                 vals <- paste(input$goals_Team,  collapse=", ")
-                g <- one_team %>%
-                    ggplot(aes(x = Date, y = cumgoals, color = Team, group = Team)) +
-                    geom_line() +
-                    theme_minimal() +
-                    theme(plot.title = element_text(hjust = 0.5, face = "bold"),
-                          plot.subtitle = element_text(hjust = 0.5),
-                          legend.title = element_text(hjust = 0.5)) +
-                    labs(title = paste("Goals Scored from", input$goal_season, "Season"),
-                         subtitle = paste("Teams:", vals),
-                         x="Date",
-                         y = "Cumulative Goals") +
-                    guides(col = guide_legend(ncol=2)) +
-                    scale_color_manual(values = col.pal) +
-                    geom_label_repel(aes(label=as.character(label)),
-                                     show.legend = FALSE) +
-                    scale_x_date(date_labels = "%b '%y",
-                                 date_breaks = "1 month")
+
+
+                if (nrow(pre_covid_break) == 0) {
+                    g <- ggplot() +
+                        geom_line(data = one_team,
+                                  aes(x = Date, y = cumgoals, color = Team, group = Team)) +
+                        theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                              plot.subtitle = element_text(hjust = 0.5),
+                              legend.title = element_text(hjust = 0.5)) +
+                        labs(title = paste("Goals Scored from", input$goal_season, "Season"),
+                             subtitle = paste("Teams:", vals),
+                             x="Date",
+                             y = "Cumulative Goals") +
+                        guides(col = guide_legend(ncol=2)) +
+                        scale_color_manual(values = col.pal) +
+                        geom_label_repel(data = one_team,
+                                         aes(x = Date, y = cumgoals, color = Team, group = Team, label=as.character(label)),
+                                         show.legend = FALSE) +
+                        scale_x_date(date_labels = "%b '%y",
+                                     date_breaks = "1 month")
+                } else {
+                    g <- ggplot() +
+                        geom_line(data = one_team %>% filter(Date <= "2020-04-01"),
+                                  aes(x = Date, y = cumgoals, color = Team, group = Team)) +
+                        geom_line(data = post_covid_break,
+                                  aes(x = Date, y = cumgoals, color = Team, group = Team)) +
+                        theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                              plot.subtitle = element_text(hjust = 0.5),
+                              legend.title = element_text(hjust = 0.5)) +
+                        labs(title = paste("Goals Scored from", input$goal_season, "Season"),
+                             subtitle = paste("Teams:", vals),
+                             x="Date",
+                             y = "Cumulative Goals") +
+                        guides(col = guide_legend(ncol=2)) +
+                        scale_color_manual(values = col.pal) +
+                        geom_label_repel(data = one_team,
+                                         aes(x = Date, y = cumgoals, color = Team, group = Team, label=as.character(label)),
+                                         show.legend = FALSE) +
+                        scale_x_date(date_labels = "%b '%y",
+                                     date_breaks = "1 month") +
+                        geom_segment(data = rbind(pre_covid_break, post_covid_break) %>% group_by(Team) %>% top_n(1, wt = final_id),
+                                     aes(x = x, xend = xend, y = y, yend = yend,
+                                         color = Team, group = Team),
+                                     linetype = 2, alpha = 0.8
+                        )
+                }
             }
         }
-        
+
         g
     })
-    
+
     
     #=========================================================== Prediction/Models Tab ===========================================================#
     
     #=========================================================== Text ===========================================================#
+    
+    output$prediction_text <- renderUI({
+        HTML("The models use the 2010-2011 to 2017-2018 seasons as training data and the 2018-2019 season as testing data.")
+    })
     
     output$generalize_models <- renderUI({
         HTML("The classifiers have a rough time classifying <i>Draws</i> when only using features corresponding to current performance. 
@@ -984,7 +1264,7 @@ server = function(input, output) {
         } else {
             plot(svm_win_unbeaten_streak)
         }
-    })
+    }) 
     
     output$win_unbeaten_streak_cm <- renderPrint({
         if (input$model_type == "Naive Bayes") {
@@ -998,10 +1278,102 @@ server = function(input, output) {
             print_tbl_txt(prediction)
         }
     })
+    #=========================================================== Time Series ===========================================================#
+    
+    output$time_series <- renderPlot({
+        ts_team = team_points_app %>%
+            filter(Team==input$ts_team) %>%
+            arrange(Date) %>%
+            ungroup() %>%
+            mutate(t=time(Date))
+
+        plot_ts = function(m) {
+            string = as.character(m$call)
+            arima_name = str_replace_all(paste0(
+                toupper(string[1]),
+                str_trim(gsub("c", "", string[3]), "right"),
+                gsub(", period = 38).*", "", gsub(".*\\= c", "", string[4])),
+                "[",gsub(").*", "", gsub(".*period = ", "", string[4])),"]"), " ", "")
+
+            g = tibble(
+                t = train$Date,
+                y = train$cumpoints,
+                yhat = m %>% fitted()
+            ) %>%
+                ggplot() +
+                geom_line(aes(x=t,y=y)) +
+                geom_line(aes(x=t, y=yhat), color="red", alpha = 0.8) +
+                labs(title = paste0("Predictions from ", arima_name),
+                     x = "Time", y = "Cumulative Points") +
+                theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                      legend.title = element_text(hjust = 0.5))
+
+
+            f = forecast(m, nrow(ts_team %>% filter(Date > "2018-07-01")))  %>% autoplot() +
+                geom_line(data = ts_team %>% filter(t==304 | t==305), aes(x=t, y=cumpoints), color="black") +
+                geom_line(data = ts_team %>% filter(Date > "2018-07-01"), aes(x=t, y=cumpoints), color="red") +
+                labs(x = "Time", y = "Cumulative Points") +
+                theme(plot.title = element_text(hjust = 0.5, face = "bold"),
+                      legend.title = element_text(hjust = 0.5))
+
+            grid.arrange(g,f)
+        }
+
+        if(input$ts_team=="Liverpool") {
+            train = ts_team %>% filter(Date < "2018-07-01")
+            m = Arima(train$cumpoints,  order = c(0,1,0), seasonal = list(order = c(0,1,3), period = 38))
+
+            plot_ts(m)
+        }
+
+        if(input$ts_team=="Arsenal") {
+            train = ts_team %>% filter(Date < "2018-07-01")
+            m = Arima(train$cumpoints, order = c(0,1,0),seasonal = list(order = c(0,1,1), period = 38))
+
+            plot_ts(m)
+        }
+
+        if(input$ts_team=="Man City") {
+            train = ts_team %>% filter(Date < "2018-07-01")
+            m = Arima(train$cumpoints, order = c(0,1,0),  seasonal = list(order = c(1,1,1), period = 38))
+
+            plot_ts(m)
+        }
+    })
+
+    output$residual_plot <- renderPlot({
+        ts_team = team_points_app %>%
+            filter(Team==input$ts_team) %>%
+            arrange(Date) %>%
+            ungroup() %>%
+            mutate(t=time(Date))
+
+        if(input$ts_team=="Liverpool") {
+            train = ts_team %>% filter(Date < "2018-07-01")
+            m = Arima(train$cumpoints,  order = c(0,1,0), seasonal = list(order = c(0,1,3), period = 38))
+
+            ggtsdisplay(m$residuals)
+        }
+
+        if(input$ts_team=="Arsenal") {
+            train = ts_team %>% filter(Date < "2018-07-01")
+            m = Arima(train$cumpoints, order = c(0,1,0),seasonal = list(order = c( 0,1,1), period = 38))
+
+            ggtsdisplay(m$residuals)
+        }
+
+        if(input$ts_team=="Man City") {
+            train = ts_team %>% filter(Date < "2018-07-01")
+            m = Arima(train$cumpoints, order = c(0,1,0),  seasonal = list(order = c(1,1,1), period = 38))
+
+            ggtsdisplay(m$residuals)
+        }
+    })
     
 }
 
 shinyApp(ui = ui, server = server)
+
 
 
 

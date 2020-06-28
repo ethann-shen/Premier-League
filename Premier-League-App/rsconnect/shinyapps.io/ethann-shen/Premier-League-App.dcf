@@ -4,9 +4,9 @@ username:
 account: ethann-shen
 server: shinyapps.io
 hostUrl: https://api.shinyapps.io/v1
-appId: 2270149
-bundleId: 3134220
-url: https://ethann-shen.shinyapps.io/premier-league-app/
-when: 1589241400.45332
+appId: 2513704
+bundleId: 3325912
+url: https://ethann-shen.shinyapps.io/Premier-League-App/
+when: 1593354486.347
 asMultiple: FALSE
 asStatic: FALSE
